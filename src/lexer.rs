@@ -68,6 +68,9 @@ pub enum Token<'a> {
     #[regex(r"(?i:concat_ws)\([^)]*\)", extract_args_vec)]
     CONCAT_WS(Vec<&'a str>),
 
+    #[regex(r"(?i:count)\([^)]*\)", extract_args_vec)]
+    COUNT(Vec<&'a str>),
+
     #[regex(r"(?i:format)\([^)]*\)", extract_args_vec)]
     FORMAT(Vec<&'a str>),
 
@@ -223,6 +226,12 @@ pub enum Token<'a> {
 
     #[token(";")]
     SEMICOLON,
+
+    #[token("*")]
+    ASTERISK,
+
+    #[token(".")]
+    DOT,
 
     #[regex(r"[+-]?\d+(\.\d+)?")]
     NUMBER(&'a str),
@@ -487,6 +496,92 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::EQUALS)));
         assert_eq!(lexer.next(), Some(Ok(Token::NUMBER("1"))));
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_delete_query() {
+        let query = "DELETE FROM Customers WHERE CustomerName = 'Alfreds Futterkiste';";
+        let mut lexer = Token::lexer(query);
+
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("DELETE"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("Customers"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("WHERE"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("CustomerName"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::EQUALS)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::STRING_LITERAL("Alfreds Futterkiste")))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_function_call() {
+        let query = "SELECT ABS(-5) AS AbsoluteValue;";
+        let mut lexer = Token::lexer(query);
+
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::ABS(vec!["-5"]))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("AS"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("AbsoluteValue"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_select_distinct() {
+        let query = "SELECT DISTINCT name FROM users";
+        let mut lexer = Token::lexer(query);
+
+        assert_eq!(lexer.next(), Some(Ok(Token::SELECT_DISTINCT)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("name"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("users"))));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_left_join() {
+        let query = "SELECT * FROM orders LEFT JOIN customers ON orders.customer_id = customers.id";
+        let mut lexer = Token::lexer(query);
+
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::ASTERISK)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("orders"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::LEFT_JOIN)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("customers"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("ON"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("orders"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::DOT)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("customer_id"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::EQUALS)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("customers"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::DOT)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("id"))));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_group_by_order_by() {
+        let query =
+            "SELECT category, COUNT(*) FROM products GROUP BY category ORDER BY COUNT(*) DESC";
+        let mut lexer = Token::lexer(query);
+
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("category"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
+        assert_eq!(lexer.next(), Some(Ok(Token::COUNT(vec!["*"]))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("products"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::GROUP_BY)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("category"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::ORDER_BY)));
+        assert_eq!(lexer.next(), Some(Ok(Token::COUNT(vec!["*"]))));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("DESC"))));
         assert_eq!(lexer.next(), None);
     }
 }
