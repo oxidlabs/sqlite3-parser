@@ -1,4 +1,5 @@
 use logos::{Logos, Span};
+use std::borrow::Cow;
 
 #[allow(non_camel_case_types)]
 #[derive(Logos, Debug, PartialEq)]
@@ -46,163 +47,18 @@ pub enum Token<'a> {
     #[token("LEFT JOIN")]
     LEFT_JOIN,
 
+    #[token("INNER JOIN")]
+    INNER_JOIN,
+
     #[token("ORDER BY")]
     ORDER_BY,
 
     // FUNCTIONS
-    #[regex(r"(?i:abs)\([^)]*\)", extract_args_vec)]
-    ABS(Vec<&'a str>),
-
-    #[regex(r"(?i:changes)\([^)]*\)", extract_args_vec)]
-    CHANGES(Vec<&'a str>),
-
-    #[regex(r"(?i:char)\([^)]*\)", extract_args_vec)]
-    CHAR(Vec<&'a str>),
-
-    #[regex(r"(?i:coalesce)\([^)]*\)", extract_args_vec)]
-    COALESCE(Vec<&'a str>),
-
-    #[regex(r"(?i:concat)\([^)]*\)", extract_args_vec)]
-    CONCAT(Vec<&'a str>),
-
-    #[regex(r"(?i:concat_ws)\([^)]*\)", extract_args_vec)]
-    CONCAT_WS(Vec<&'a str>),
-
-    #[regex(r"(?i:count)\([^)]*\)", extract_args_vec)]
-    COUNT(Vec<&'a str>),
-
-    #[regex(r"(?i:format)\([^)]*\)", extract_args_vec)]
-    FORMAT(Vec<&'a str>),
-
-    #[regex(r"(?i:glob)\([^)]*\)", extract_args_vec)]
-    GLOB(Vec<&'a str>),
-
-    #[regex(r"(?i:hex)\([^)]*\)", extract_args_vec)]
-    HEX(Vec<&'a str>),
-
-    #[regex(r"(?i:if)\([^)]*\)", extract_args_vec)]
-    IF(Vec<&'a str>),
-
-    #[regex(r"(?i:ifnull)\([^)]*\)", extract_args_vec)]
-    IFNULL(Vec<&'a str>),
-
-    #[regex(r"(?i:iif)\([^)]*\)", extract_args_vec)]
-    IIF(Vec<&'a str>),
-
-    #[regex(r"(?i:instr)\([^)]*\)", extract_args_vec)]
-    INSTR(Vec<&'a str>),
-
-    #[regex(r"(?i:last_insert_rowid)\([^)]*\)", extract_args_vec)]
-    LAST_INSERT_ROWID(Vec<&'a str>),
-
-    #[regex(r"(?i:length)\([^)]*\)", extract_args_vec)]
-    LENGTH(Vec<&'a str>),
-
-    #[regex(r"(?i:like)\([^)]*\)", extract_args_vec)]
-    LIKE_FUNCTION(Vec<&'a str>),
-
-    #[regex(r"(?i:likelihood)\([^)]*\)", extract_args_vec)]
-    LIKELIHOOD(Vec<&'a str>),
-
-    #[regex(r"(?i:likely)\([^)]*\)", extract_args_vec)]
-    LIKELY(Vec<&'a str>),
-
-    #[regex(r"(?i:load_extension)\([^)]*\)", extract_args_vec)]
-    LOAD_EXTENSION(Vec<&'a str>),
-
-    #[regex(r"(?i:lower)\([^)]*\)", extract_args_vec)]
-    LOWER(Vec<&'a str>),
-
-    #[regex(r"(?i:ltrim)\([^)]*\)", extract_args_vec)]
-    LTRIM(Vec<&'a str>),
-
-    #[regex(r"(?i:max)\([^)]*\)", extract_args_vec)]
-    MAX(Vec<&'a str>),
-
-    #[regex(r"(?i:min)\([^)]*\)", extract_args_vec)]
-    MIN(Vec<&'a str>),
-
-    #[regex(r"(?i:nullif)\([^)]*\)", extract_args_vec)]
-    NULLIF(Vec<&'a str>),
-
-    #[regex(r"(?i:octet_length)\([^)]*\)", extract_args_vec)]
-    OCTET_LENGTH(Vec<&'a str>),
-
-    #[regex(r"(?i:printf)\([^)]*\)", extract_args_vec)]
-    PRINTF(Vec<&'a str>),
-
-    #[regex(r"(?i:quote)\([^)]*\)", extract_args_vec)]
-    QUOTE(Vec<&'a str>),
-
-    #[regex(r"(?i:random)\([^)]*\)", extract_args_vec)]
-    RANDOM(Vec<&'a str>),
-
-    #[regex(r"(?i:randomblob)\([^)]*\)", extract_args_vec)]
-    RANDOMBLOB(Vec<&'a str>),
-
-    #[regex(r"(?i:replace)\([^)]*\)", extract_args_vec)]
-    REPLACE(Vec<&'a str>),
-
-    #[regex(r"(?i:round)\([^)]*\)", extract_args_vec)]
-    ROUND(Vec<&'a str>),
-
-    #[regex(r"(?i:rtrim)\([^)]*\)", extract_args_vec)]
-    RTRIM(Vec<&'a str>),
-
-    #[regex(r"(?i:sign)\([^)]*\)", extract_args_vec)]
-    SIGN(Vec<&'a str>),
-
-    #[regex(r"(?i:soundex)\([^)]*\)", extract_args_vec)]
-    SOUNDEX(Vec<&'a str>),
-
-    #[regex(r"(?i:sqlite_compileoption_get)\([^)]*\)", extract_args_vec)]
-    SQLITE_COMPILEOPTION_GET(Vec<&'a str>),
-
-    #[regex(r"(?i:sqlite_compileoption_used)\([^)]*\)", extract_args_vec)]
-    SQLITE_COMPILEOPTION_USED(Vec<&'a str>),
-
-    #[regex(r"(?i:sqlite_offset)\([^)]*\)", extract_args_vec)]
-    SQLITE_OFFSET(Vec<&'a str>),
-
-    #[regex(r"(?i:sqlite_source_id)\([^)]*\)", extract_args_vec)]
-    SQLITE_SOURCE_ID(Vec<&'a str>),
-
-    #[regex(r"(?i:sqlite_version)\([^)]*\)", extract_args_vec)]
-    SQLITE_VERSION(Vec<&'a str>),
-
-    #[regex(r"(?i:substr)\([^)]*\)", extract_args_vec)]
-    SUBSTR(Vec<&'a str>),
-
-    #[regex(r"(?i:substring)\([^)]*\)", extract_args_vec)]
-    SUBSTRING(Vec<&'a str>),
-
-    #[regex(r"(?i:total_changes)\([^)]*\)", extract_args_vec)]
-    TOTAL_CHANGES(Vec<&'a str>),
-
-    #[regex(r"(?i:trim)\([^)]*\)", extract_args_vec)]
-    TRIM(Vec<&'a str>),
-
-    #[regex(r"(?i:typeof)\([^)]*\)", extract_args_vec)]
-    TYPEOF(Vec<&'a str>),
-
-    #[regex(r"(?i:unhex)\([^)]*\)", extract_args_vec)]
-    UNHEX(Vec<&'a str>),
-
-    #[regex(r"(?i:unicode)\([^)]*\)", extract_args_vec)]
-    UNICODE(Vec<&'a str>),
-
-    #[regex(r"(?i:unlikely)\([^)]*\)", extract_args_vec)]
-    UNLIKELY(Vec<&'a str>),
-
-    #[regex(r"(?i:upper)\([^)]*\)", extract_args_vec)]
-    UPPER(Vec<&'a str>),
-
-    #[regex(r"(?i:zeroblob)\([^)]*\)", extract_args_vec)]
-    ZEROBLOB(Vec<&'a str>),
-
-    // VALUES
-    #[regex(r"\([^)]*\)", extract_values)]
-    VALUE_VECTOR(Vec<&'a str>),
+    #[regex(
+        r"(?i:[A-Za-z_][A-Za-z0-9_]*\((?:[^()]+|\((?:[^()]+|\([^()]*\))*\))*\))",
+        extract_function
+    )]
+    FUNCTION((&'a str, Cow<'a, str>)),
 
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice())]
     IDENTIFIER(&'a str),
@@ -224,6 +80,34 @@ pub enum Token<'a> {
     #[token("=")]
     EQUALS,
 
+    #[token("<")]
+    LESS_THAN,
+
+    #[token(">")]
+    GREATER_THAN,
+
+    #[token("<=")]
+    LESS_THAN_EQUAL,
+
+    #[token(">=")]
+    GREATER_THAN_EQUAL,
+
+    #[token("<>")]
+    #[token("!=")]
+    NOT_EQUAL,
+
+    #[token("+")]
+    PLUS,
+
+    #[token("-")]
+    MINUS,
+
+    #[token("/")]
+    SLASH,
+
+    #[token("%")]
+    PERCENT,
+
     #[token(";")]
     SEMICOLON,
 
@@ -232,6 +116,12 @@ pub enum Token<'a> {
 
     #[token(".")]
     DOT,
+
+    #[token("(")]
+    LEFT_PAREN,
+
+    #[token(")")]
+    RIGHT_PAREN,
 
     #[regex(r"[+-]?\d+(\.\d+)?")]
     NUMBER(&'a str),
@@ -366,35 +256,32 @@ pub enum Keywords {
     VALUES,
 }
 
-fn extract_args_vec<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> Vec<&'a str> {
-    let slice = lex.slice();
-    let start = slice.find('(').unwrap() + 1;
-    let end = slice.rfind(')').unwrap();
-    let inner = &slice[start..end];
-    if inner.trim().is_empty() {
-        Vec::new()
+fn collapse_whitespace(s: &str) -> Cow<str> {
+    let mut iter = s.split_whitespace();
+    if let Some(first) = iter.next() {
+        let mut result = first.to_string();
+        for word in iter {
+            result.push(' ');
+            result.push_str(word);
+        }
+        if result == s {
+            Cow::Borrowed(s)
+        } else {
+            Cow::Owned(result)
+        }
     } else {
-        inner.split(',').map(|s| s.trim()).collect()
+        Cow::Borrowed(s)
     }
 }
 
-fn extract_values<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> Vec<&'a str> {
+fn extract_function<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> (&'a str, Cow<'a, str>) {
     let slice = lex.slice();
-
-    let inner = &slice[1..slice.len() - 1];
-    inner
-        .split(',')
-        .map(|s| {
-            let s = s.trim();
-            if s.starts_with('"') {
-                s.strip_prefix('"').unwrap().strip_suffix('"').unwrap()
-            } else if s.starts_with("\'") {
-                s.strip_prefix('\'').unwrap().strip_suffix('\'').unwrap()
-            } else {
-                s
-            }
-        })
-        .collect()
+    let start = slice.find('(').unwrap();
+    let end = slice.rfind(')').unwrap();
+    let name = slice[..start].trim();
+    let inner = slice[start + 1..end].trim();
+    let inner_clean = collapse_whitespace(inner);
+    (name, inner_clean)
 }
 
 fn extract_decimal<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> (usize, usize) {
@@ -452,23 +339,21 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("INSERT"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("INTO"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("Customers"))));
-        assert_eq!(
-            lexer.next(),
-            Some(Ok(Token::VALUE_VECTOR(vec![
-                "CustomerName",
-                "City",
-                "Country"
-            ])))
-        );
+        assert_eq!(lexer.next(), Some(Ok(Token::LEFT_PAREN)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("CustomerName"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("City"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
+        assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("Country"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::RIGHT_PAREN)));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("VALUES"))));
-        assert_eq!(
-            lexer.next(),
-            Some(Ok(Token::VALUE_VECTOR(vec![
-                "Cardinal",
-                "Stavanger",
-                "Norway"
-            ])))
-        );
+        assert_eq!(lexer.next(), Some(Ok(Token::LEFT_PAREN)));
+        assert_eq!(lexer.next(), Some(Ok(Token::STRING_LITERAL("Cardinal"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
+        assert_eq!(lexer.next(), Some(Ok(Token::STRING_LITERAL("Stavanger"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
+        assert_eq!(lexer.next(), Some(Ok(Token::STRING_LITERAL("Norway"))));
+        assert_eq!(lexer.next(), Some(Ok(Token::RIGHT_PAREN)));
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
         assert_eq!(lexer.next(), None);
     }
@@ -524,7 +409,10 @@ mod tests {
         let mut lexer = Token::lexer(query);
 
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
-        assert_eq!(lexer.next(), Some(Ok(Token::ABS(vec!["-5"]))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::FUNCTION(("ABS", Cow::Borrowed("-5")))))
+        );
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("AS"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("AbsoluteValue"))));
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
@@ -574,14 +462,539 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("category"))));
         assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
-        assert_eq!(lexer.next(), Some(Ok(Token::COUNT(vec!["*"]))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::FUNCTION(("COUNT", Cow::Borrowed("*")))))
+        );
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("products"))));
         assert_eq!(lexer.next(), Some(Ok(Token::GROUP_BY)));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("category"))));
         assert_eq!(lexer.next(), Some(Ok(Token::ORDER_BY)));
-        assert_eq!(lexer.next(), Some(Ok(Token::COUNT(vec!["*"]))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::FUNCTION(("COUNT", Cow::Borrowed("*")))))
+        );
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("DESC"))));
         assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_complex_sql_query() {
+        let query = r"
+        WITH DepartmentSummary AS (
+    SELECT 
+        d.department_id,
+        d.department_name,
+        COUNT(e.employee_id) AS employee_count,
+        AVG(s.salary) AS avg_salary,
+        SUM(CASE WHEN e.hire_date > DATEADD(year, -5, GETDATE()) 
+                 THEN 1 ELSE 0 END) AS recent_hires,
+        RANK() OVER (ORDER BY SUM(s.salary) DESC) AS dept_salary_rank
+    FROM departments d
+    LEFT JOIN employees e ON d.department_id = e.department_id
+    INNER JOIN salaries s ON e.employee_id = s.employee_id
+    WHERE s.effective_date = (
+        SELECT MAX(s2.effective_date)
+        FROM salaries s2
+        WHERE s2.employee_id = s.employee_id
+    )
+    GROUP BY d.department_id, d.department_name
+    HAVING AVG(s.salary) > (
+        SELECT AVG(s3.salary) * 0.8
+        FROM salaries s3
+        WHERE s3.effective_date > DATEADD(year, -2, GETDATE())
+    )
+),
+ProjectBudgetAnalysis AS (
+    SELECT 
+        p.project_id,
+        p.project_name,
+        p.budget,
+        p.department_id,
+        (SELECT COUNT(*) 
+         FROM project_assignments pa 
+         WHERE pa.project_id = p.project_id) AS team_size,
+        COALESCE(SUM(pa.hours_worked * e.hourly_rate), 0) AS estimated_cost,
+        p.budget - COALESCE(SUM(pa.hours_worked * e.hourly_rate), 0) AS budget_variance
+    FROM projects p
+    LEFT JOIN project_assignments pa ON p.project_id = pa.project_id
+    LEFT JOIN employees e ON pa.employee_id = e.employee_id
+    GROUP BY p.project_id, p.project_name, p.budget, p.department_id
+)
+SELECT 
+    ds.department_name,
+    ds.avg_salary,
+    ds.dept_salary_rank,
+    pba.project_name,
+    pba.budget_variance,
+    ROW_NUMBER() OVER (
+        PARTITION BY ds.department_id 
+        ORDER BY pba.budget_variance DESC
+    ) AS project_rank,
+    (SELECT STRING_AGG(e.first_name + ' ' + e.last_name, ', ')
+     FROM employees e
+     WHERE e.department_id = ds.department_id
+     AND e.employee_id IN (
+         SELECT TOP 3 pa.employee_id
+         FROM project_assignments pa
+         WHERE pa.project_id = pba.project_id
+         ORDER BY pa.hours_worked DESC
+     )) AS top_performers,
+    CASE 
+        WHEN pba.budget_variance < 0 THEN 'Over Budget'
+        WHEN pba.budget_variance BETWEEN 0 AND 10000 THEN 'On Track'
+        ELSE 'Under Budget'
+    END AS budget_status
+FROM DepartmentSummary ds
+INNER JOIN ProjectBudgetAnalysis pba ON ds.department_id = pba.department_id
+WHERE ds.department_id IN (
+    SELECT department_id
+    FROM employees
+    GROUP BY department_id
+    HAVING COUNT(DISTINCT job_id) > 5
+)
+AND EXISTS (
+    SELECT 1
+    FROM employee_skills es
+    WHERE es.employee_id IN (
+        SELECT employee_id
+        FROM project_assignments pa
+        WHERE pa.project_id = pba.project_id
+    )
+    AND es.skill_id IN (123, 456, 789)
+)
+ORDER BY 
+    ds.dept_salary_rank,
+    project_rank,
+    CASE budget_status
+        WHEN 'Over Budget' THEN 1
+        WHEN 'On Track' THEN 2
+        ELSE 3
+    END;
+        ";
+
+        let mut lexer = Token::lexer(query);
+
+        let pattern = [
+            Token::IDENTIFIER("WITH"),
+            Token::IDENTIFIER("DepartmentSummary"),
+            Token::IDENTIFIER("AS"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::IDENTIFIER("d"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::COMMA,
+            Token::IDENTIFIER("d"),
+            Token::DOT,
+            Token::IDENTIFIER("department_name"),
+            Token::COMMA,
+            Token::FUNCTION(("COUNT", Cow::Borrowed("e.employee_id"))),
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("employee_count"),
+            Token::COMMA,
+            Token::FUNCTION(("AVG", Cow::Borrowed("s.salary"))),
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("avg_salary"),
+            Token::COMMA,
+            Token::FUNCTION((
+                "SUM",
+                Cow::Borrowed(
+                    "CASE WHEN e.hire_date > DATEADD(year, -5, GETDATE()) THEN 1 ELSE 0 END",
+                ),
+            )),
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("recent_hires"),
+            Token::COMMA,
+            Token::FUNCTION(("RANK", Cow::Borrowed(""))),
+            Token::IDENTIFIER("OVER"),
+            Token::LEFT_PAREN,
+            Token::ORDER_BY,
+            Token::FUNCTION(("SUM", Cow::Borrowed("s.salary"))),
+            Token::IDENTIFIER("DESC"),
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("dept_salary_rank"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("departments"),
+            Token::IDENTIFIER("d"),
+            Token::LEFT_JOIN,
+            Token::IDENTIFIER("employees"),
+            Token::IDENTIFIER("e"),
+            Token::IDENTIFIER("ON"),
+            Token::IDENTIFIER("d"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("e"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::INNER_JOIN,
+            Token::IDENTIFIER("salaries"),
+            Token::IDENTIFIER("s"),
+            Token::IDENTIFIER("ON"),
+            Token::IDENTIFIER("e"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("s"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("s"),
+            Token::DOT,
+            Token::IDENTIFIER("effective_date"),
+            Token::EQUALS,
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::FUNCTION(("MAX", Cow::Borrowed("s2.effective_date"))),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("salaries"),
+            Token::IDENTIFIER("s2"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("s2"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("s"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::RIGHT_PAREN,
+            Token::GROUP_BY,
+            Token::IDENTIFIER("d"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::COMMA,
+            Token::IDENTIFIER("d"),
+            Token::DOT,
+            Token::IDENTIFIER("department_name"),
+            Token::IDENTIFIER("HAVING"),
+            Token::FUNCTION(("AVG", Cow::Borrowed("s.salary"))),
+            Token::GREATER_THAN,
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::FUNCTION(("AVG", Cow::Borrowed("s3.salary"))),
+            Token::ASTERISK,
+            Token::NUMBER("0.8"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("salaries"),
+            Token::IDENTIFIER("s3"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("s3"),
+            Token::DOT,
+            Token::IDENTIFIER("effective_date"),
+            Token::GREATER_THAN,
+            Token::FUNCTION(("DATEADD", Cow::Borrowed("year, -2, GETDATE()"))),
+            Token::RIGHT_PAREN,
+            Token::RIGHT_PAREN,
+            Token::COMMA,
+            Token::IDENTIFIER("ProjectBudgetAnalysis"),
+            Token::IDENTIFIER("AS"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("project_name"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("budget"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::COMMA,
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::FUNCTION(("COUNT", Cow::Borrowed("*"))),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("project_assignments"),
+            Token::IDENTIFIER("pa"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("team_size"),
+            Token::COMMA,
+            Token::FUNCTION((
+                "COALESCE",
+                Cow::Borrowed("SUM(pa.hours_worked * e.hourly_rate), 0"),
+            )),
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("estimated_cost"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("budget"),
+            Token::MINUS,
+            Token::FUNCTION((
+                "COALESCE",
+                Cow::Borrowed("SUM(pa.hours_worked * e.hourly_rate), 0"),
+            )),
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("budget_variance"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("projects"),
+            Token::IDENTIFIER("p"),
+            Token::LEFT_JOIN,
+            Token::IDENTIFIER("project_assignments"),
+            Token::IDENTIFIER("pa"),
+            Token::IDENTIFIER("ON"),
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::LEFT_JOIN,
+            Token::IDENTIFIER("employees"),
+            Token::IDENTIFIER("e"),
+            Token::IDENTIFIER("ON"),
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("e"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::GROUP_BY,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("project_name"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("budget"),
+            Token::COMMA,
+            Token::IDENTIFIER("p"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("department_name"),
+            Token::COMMA,
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("avg_salary"),
+            Token::COMMA,
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("dept_salary_rank"),
+            Token::COMMA,
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("project_name"),
+            Token::COMMA,
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("budget_variance"),
+            Token::COMMA,
+            Token::FUNCTION(("ROW_NUMBER", Cow::Borrowed(""))),
+            Token::IDENTIFIER("OVER"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("PARTITION"),
+            Token::IDENTIFIER("BY"),
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::ORDER_BY,
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("budget_variance"),
+            Token::IDENTIFIER("DESC"),
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("project_rank"),
+            Token::COMMA,
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::FUNCTION((
+                "STRING_AGG",
+                Cow::Borrowed("e.first_name + ' ' + e.last_name, ', '"),
+            )),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("employees"),
+            Token::IDENTIFIER("e"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("e"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::IDENTIFIER("AND"),
+            Token::IDENTIFIER("e"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::IDENTIFIER("IN"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::IDENTIFIER("TOP"),
+            Token::NUMBER("3"),
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("project_assignments"),
+            Token::IDENTIFIER("pa"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::ORDER_BY,
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("hours_worked"),
+            Token::IDENTIFIER("DESC"),
+            Token::RIGHT_PAREN,
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("top_performers"),
+            Token::COMMA,
+            Token::IDENTIFIER("CASE"),
+            Token::IDENTIFIER("WHEN"),
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("budget_variance"),
+            Token::LESS_THAN,
+            Token::NUMBER("0"),
+            Token::IDENTIFIER("THEN"),
+            Token::STRING_LITERAL("Over Budget"),
+            Token::IDENTIFIER("WHEN"),
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("budget_variance"),
+            Token::IDENTIFIER("BETWEEN"),
+            Token::NUMBER("0"),
+            Token::IDENTIFIER("AND"),
+            Token::NUMBER("10000"),
+            Token::IDENTIFIER("THEN"),
+            Token::STRING_LITERAL("On Track"),
+            Token::IDENTIFIER("ELSE"),
+            Token::STRING_LITERAL("Under Budget"),
+            Token::IDENTIFIER("END"),
+            Token::IDENTIFIER("AS"),
+            Token::IDENTIFIER("budget_status"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("DepartmentSummary"),
+            Token::IDENTIFIER("ds"),
+            Token::INNER_JOIN,
+            Token::IDENTIFIER("ProjectBudgetAnalysis"),
+            Token::IDENTIFIER("pba"),
+            Token::IDENTIFIER("ON"),
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("department_id"),
+            Token::IDENTIFIER("IN"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::IDENTIFIER("department_id"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("employees"),
+            Token::GROUP_BY,
+            Token::IDENTIFIER("department_id"),
+            Token::IDENTIFIER("HAVING"),
+            Token::FUNCTION(("COUNT", Cow::Borrowed("DISTINCT job_id"))),
+            Token::GREATER_THAN,
+            Token::NUMBER("5"),
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("AND"),
+            Token::IDENTIFIER("EXISTS"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::NUMBER("1"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("employee_skills"),
+            Token::IDENTIFIER("es"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("es"),
+            Token::DOT,
+            Token::IDENTIFIER("employee_id"),
+            Token::IDENTIFIER("IN"),
+            Token::LEFT_PAREN,
+            Token::IDENTIFIER("SELECT"),
+            Token::IDENTIFIER("employee_id"),
+            Token::IDENTIFIER("FROM"),
+            Token::IDENTIFIER("project_assignments"),
+            Token::IDENTIFIER("pa"),
+            Token::IDENTIFIER("WHERE"),
+            Token::IDENTIFIER("pa"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::EQUALS,
+            Token::IDENTIFIER("pba"),
+            Token::DOT,
+            Token::IDENTIFIER("project_id"),
+            Token::RIGHT_PAREN,
+            Token::IDENTIFIER("AND"),
+            Token::IDENTIFIER("es"),
+            Token::DOT,
+            Token::IDENTIFIER("skill_id"),
+            Token::IDENTIFIER("IN"),
+            Token::LEFT_PAREN,
+            Token::NUMBER("123"),
+            Token::COMMA,
+            Token::NUMBER("456"),
+            Token::COMMA,
+            Token::NUMBER("789"),
+            Token::RIGHT_PAREN,
+            Token::RIGHT_PAREN,
+            Token::ORDER_BY,
+            Token::IDENTIFIER("ds"),
+            Token::DOT,
+            Token::IDENTIFIER("dept_salary_rank"),
+            Token::COMMA,
+            Token::IDENTIFIER("project_rank"),
+            Token::COMMA,
+            Token::IDENTIFIER("CASE"),
+            Token::IDENTIFIER("budget_status"),
+            Token::IDENTIFIER("WHEN"),
+            Token::STRING_LITERAL("Over Budget"),
+            Token::IDENTIFIER("THEN"),
+            Token::NUMBER("1"),
+            Token::IDENTIFIER("WHEN"),
+            Token::STRING_LITERAL("On Track"),
+            Token::IDENTIFIER("THEN"),
+            Token::NUMBER("2"),
+            Token::IDENTIFIER("ELSE"),
+            Token::NUMBER("3"),
+            Token::IDENTIFIER("END"),
+            Token::SEMICOLON,
+        ];
+
+        for token_match in pattern {
+            assert_eq!(lexer.next(), Some(Ok(token_match)));
+        }
     }
 }
