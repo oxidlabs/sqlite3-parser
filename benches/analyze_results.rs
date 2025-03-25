@@ -22,7 +22,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let group_dir = group_dir?;
         let group_path = group_dir.path();
         
-        if group_path.is_dir() && group_path.file_name().unwrap().to_string_lossy().contains("SQLite Parsers") {
+        if group_path.is_dir() && group_path.file_name().unwrap().to_string_lossy().to_lowercase().contains("sqlite parsers") {
+            println!("Found benchmark group: {}", group_path.file_name().unwrap().to_string_lossy());
+            
             // For each benchmark in this group
             for bench_dir in fs::read_dir(group_path)? {
                 let bench_dir = bench_dir?;
@@ -30,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 if bench_path.is_dir() {
                     let name = bench_path.file_name().unwrap().to_string_lossy().to_string();
+                    println!("Found benchmark: {}", name);
                     
                     // Parse benchmark name to get parser and query
                     let mut parts = name.split('/');
@@ -39,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Look for estimates.json file
                     let estimates_path = bench_path.join("estimates.json");
                     if estimates_path.exists() {
+                        println!("Found estimates.json at: {}", estimates_path.display());
                         let file = File::open(estimates_path)?;
                         let reader = BufReader::new(file);
                         
@@ -51,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let end = line.find(",").unwrap_or(line.len());
                                 let value = line[start..end].trim();
                                 mean_time = value.parse::<f64>().unwrap_or(0.0);
+                                println!("Extracted mean time: {}", mean_time);
                                 break;
                             }
                         }
@@ -59,6 +64,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         results.entry(query)
                                .or_insert_with(BTreeMap::new)
                                .insert(parser, mean_time);
+                    } else {
+                        println!("No estimates.json found at: {}", estimates_path.display());
                     }
                 }
             }
@@ -67,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Display the results
+    println!("\nBenchmark Results Table:");
     println!("| Query | Logos Parser (ns) | sqlparser-rs (ns) | Difference (%) |");
     println!("|-------|-------------------|-------------------|----------------|");
     
@@ -87,7 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                  diff_pct);
     }
     
-    println!("\nNote: Negative difference (%) means Logos parser is faster");
+    if results.is_empty() {
+        println!("\nNo results found. Make sure your benchmarks have run successfully.");
+    } else {
+        println!("\nNote: Negative difference (%) means Logos parser is faster");
+    }
     
     Ok(())
 } 
