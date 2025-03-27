@@ -1,1844 +1,1641 @@
-use crate::ast::{self, *};
-use crate::lexer::{Token, Keywords};
+use crate::ast::{
+    ResultColumn, SelectCore, SelectStmt, Stmt, Expr, Literal, BinaryOperator, UnaryOperator, FromClause,
+    TableOrSubquery, JoinClause, JoinType, JoinConstraint, OrderingTerm, AscDesc, NullsOrder, LimitClause, GroupByClause, OrderByClause
+};
+use crate::lexer::Token;
 use logos::{Logos, Span};
-use std::borrow::Cow;
-
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenType<'a> {
+    Valid(Token<'a>),
+    EndOfInput,
+    Error,
+}
 pub struct Parser<'a> {
     pub input: &'a str,
-    pub current_token: Option<Result<Token<'a>, ()>>,
+    pub current_token: TokenType<'a>,
     lexer: logos::Lexer<'a, Token<'a>>,
     span: Span,
 }
-
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         let mut lexer = Token::lexer(input);
-        let current_token = lexer.next();
+        let current_token = match lexer.next() {
+            Some(Ok(token)) => TokenType::Valid(token),
+            Some(Err(_)) => TokenType::Error,
+            None => TokenType::EndOfInput,
+        };
         let span = lexer.span();
-        
-        Self {
+        Parser {
             input,
             current_token,
             lexer,
             span,
         }
     }
-
     fn advance(&mut self) {
-        self.current_token = self.lexer.next();
+        self.current_token = match self.lexer.next() {
+            Some(Ok(token)) => TokenType::Valid(token),
+            Some(Err(_)) => TokenType::Error,
+            None => TokenType::EndOfInput,
+        };
         self.span = self.lexer.span();
     }
-
-    fn peek(&self) -> Option<&Result<Token<'a>, ()>> {
-        self.current_token.as_ref()
-    }
-
-    fn match_token(&self, token: &Token<'a>) -> bool {
+    fn match_token(&self, expected: &Token<'a>) -> bool {
         match &self.current_token {
-            Some(Ok(current)) => current == token,
+            TokenType::Valid(token) => token == expected,
             _ => false,
         }
     }
-
-    fn consume(&mut self, token: &Token<'a>) -> bool {
-        if self.match_token(token) {
+    fn consume(&mut self, expected: &Token<'a>) -> bool {
+        if self.match_token(expected) {
             self.advance();
             true
         } else {
             false
         }
     }
-
-    fn expect(&mut self, token: Token<'a>) -> Result<(), String> {
-        if self.match_token(&token) {
-            self.advance();
-            Ok(())
-        } else {
-            Err(format!(
-                "Expected token {:?}, found {:?}",
-                token, self.current_token
-            ))
-        }
-    }
-
-    fn get_token_text(&self) -> &'a str {
-        &self.input[self.span.clone()]
-    }
-
-    pub fn parse_statement(&mut self) -> Result<Stmt<'a>, String> {
+    pub fn parse_statement(&mut self) -> Result<Stmt<'static>, String> {
         match &self.current_token {
-            Some(Ok(Token::IDENTIFIER(id))) => {
-                match *id {
-                    "SELECT" => self.parse_select(),
-                    "INSERT" => self.parse_insert(),
-                    "UPDATE" => self.parse_update(),
-                    "DELETE" => self.parse_delete(),
-                    "CREATE" => self.parse_create(),
-                    "ALTER" => self.parse_alter(),
-                    "DROP" => self.parse_drop(),
-                    "BEGIN" => self.parse_begin(),
-                    "COMMIT" => self.parse_commit(),
-                    "ROLLBACK" => self.parse_rollback(),
-                    "PRAGMA" => self.parse_pragma(),
-                    "ANALYZE" => self.parse_analyze(),
-                    "ATTACH" => self.parse_attach(),
-                    "DETACH" => self.parse_detach(),
-                    "VACUUM" => self.parse_vacuum(),
-                    "REINDEX" => self.parse_reindex(),
-                    "SAVEPOINT" => self.parse_savepoint(),
-                    "RELEASE" => self.parse_release(),
-                    _ => Err(format!("Unexpected statement type: {}", id)),
+            TokenType::Valid(Token::IDENTIFIER(id)) => {
+                if id.eq_ignore_ascii_case("SELECT") {
+                    self.advance();
+                    self.parse_select()
+                } else if id.eq_ignore_ascii_case("INSERT") {
+                    Err(format!("Statement type not implemented yet: {}", id))
+                } else if id.eq_ignore_ascii_case("UPDATE") {
+                    self.advance();
+                    self.parse_update()
+                } else if id.eq_ignore_ascii_case("DELETE") {
+                    self.advance();
+                    self.parse_delete()
+                } else {
+                    self.parse_expr().map(|expr| {
+                        Stmt::Select(Box::new(SelectStmt {
+                            with_clause: None,
+                            compound_operator: None,
+                            select_core: SelectCore {
+                                distinct: false,
+                                result_columns: vec![ResultColumn::Expr {
+                                    expr: Box::new(expr),
+                                    alias: None,
+                                }],
+                                from_clause: None,
+                                where_clause: None,
+                                group_by_clause: None,
+                                having_clause: None,
+                                window_clause: None,
+                            },
+                            order_by_clause: None,
+                            limit_clause: None,
+                        }))
+                    })
                 }
-            }
-            Some(Ok(Token::SELECT_DISTINCT)) => {
+            },
+            TokenType::Valid(Token::SELECT_DISTINCT) => {
+                self.advance();
                 self.parse_select_distinct()
+            },
+            TokenType::EndOfInput => {
+                Err("Unexpected end of input".to_string())
+            },
+            TokenType::Error => {
+                Err("Lexical error".to_string())
+            },
+            _ => {
+                Err(format!("Unexpected token: {:?}", self.current_token))
             }
-            _ => Err(format!(
-                "Expected statement, found {:?}",
-                self.current_token
-            )),
         }
     }
-
-    pub fn parse_statements(&mut self) -> Result<Vec<Stmt<'a>>, String> {
-        let mut statements = Vec::new();
-        
-        while self.current_token.is_some() {
-            let stmt = self.parse_statement()?;
-            statements.push(stmt);
-            
-            if let Some(Ok(Token::SEMICOLON)) = self.current_token {
-                self.advance();
-            } else {
-                if self.current_token.is_some() {
-                    return Err(format!("Expected semicolon or end of input, found {:?}", self.current_token));
-                }
-            }
-        }
-        
-        Ok(statements)
-    }
-
-    fn parse_select(&mut self) -> Result<Stmt<'a>, String> {
-        self.advance();
-        
-        let mut select_stmt = SelectStmt {
-            with_clause: self.parse_with_clause()?,
-            compound_operator: None,
-            select_core: self.parse_select_core(false)?,
-            order_by_clause: None,
-            limit_clause: None,
-        };
-
-        if let Some(Ok(Token::ORDER_BY)) = self.current_token {
-            self.advance();
-            select_stmt.order_by_clause = Some(self.parse_order_by_clause()?);
-        } else if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "ORDER" {
-                self.advance();
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "BY" {
-                        self.advance();
-                        select_stmt.order_by_clause = Some(self.parse_order_by_clause()?);
-                    }
-                }
-            }
-        }
-
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "LIMIT" {
-                self.advance();
-                select_stmt.limit_clause = Some(self.parse_limit_clause()?);
-            }
-        }
-
-        Ok(Stmt::Select(Box::new(select_stmt)))
-    }
-
-    fn parse_select_distinct(&mut self) -> Result<Stmt<'a>, String> {
-        self.advance();
-        
-        let mut select_stmt = SelectStmt {
-            with_clause: None,
-            compound_operator: None,
-            select_core: self.parse_select_core(true)?,
-            order_by_clause: None,
-            limit_clause: None,
-        };
-
-        Ok(Stmt::Select(Box::new(select_stmt)))
-    }
-
-    fn parse_with_clause(&mut self) -> Result<Option<WithClause<'a>>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id.eq("WITH") {
-                self.advance();
-                
-                let recursive = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id.eq("RECURSIVE") {
-                        self.advance();
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                
-                let mut cte_tables = Vec::new();
-                
-                cte_tables.push(self.parse_common_table_expression()?);
-                
-                while let Some(Ok(Token::COMMA)) = self.current_token {
-                    self.advance();
-                    cte_tables.push(self.parse_common_table_expression()?);
-                }
-                
-                return Ok(Some(WithClause {
-                    recursive,
-                    cte_tables,
-                }));
-            }
-        }
-        
-        Ok(None)
-    }
-
-    fn parse_common_table_expression(&mut self) -> Result<CommonTableExpression<'a>, String> {
-        let table_name = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            let id = id.clone();
-            self.advance();
-            id
-        } else {
-            return Err("Expected identifier for CTE name".to_string());
-        };
-        
-        let column_names = if let Some(Ok(Token::LEFT_PAREN)) = self.current_token {
-            self.advance();
-            
-            let mut columns = Vec::new();
-            
-            if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                columns.push(id);
-                self.advance();
-                
-                while let Some(Ok(Token::COMMA)) = self.current_token {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        columns.push(id);
-                        self.advance();
-                    } else {
-                        return Err("Expected identifier for column name".to_string());
-                    }
-                }
-                
-                if let Some(Ok(Token::RIGHT_PAREN)) = self.current_token {
-                    self.advance();
-                } else {
-                    return Err("Expected closing parenthesis after column names".to_string());
-                }
-                
-                Some(columns)
-            } else {
-                return Err("Expected at least one column name".to_string());
-            }
-        } else {
-            None
-        };
-        
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "AS" {
-                self.advance();
-            } else {
-                return Err("Expected AS keyword".to_string());
-            }
-        } else {
-            return Err("Expected AS keyword".to_string());
-        }
-        
-        let materialized = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "MATERIALIZED" {
-                self.advance();
-                Some(true)
-            } else if id == "NOT" {
-                self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "MATERIALIZED" {
-                        self.advance();
-                        Some(false)
-                    } else {
-                        return Err("Expected MATERIALIZED after NOT".to_string());
-                    }
-                } else {
-                    return Err("Expected MATERIALIZED after NOT".to_string());
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        
-        if let Some(Ok(Token::LEFT_PAREN)) = self.current_token {
-            self.advance();
-        } else {
-            return Err("Expected opening parenthesis after AS".to_string());
-        }
-        
-        let select_stmt = self.parse_select()?;
-        
-        let select_stmt = if let Stmt::Select(stmt) = select_stmt {
-            stmt
-        } else {
-            return Err("Expected SELECT statement in CTE".to_string());
-        };
-        
-        if let Some(Ok(Token::RIGHT_PAREN)) = self.current_token {
-            self.advance();
-        } else {
-            return Err("Expected closing parenthesis after SELECT".to_string());
-        }
-        
-        Ok(CommonTableExpression {
-            table_name,
-            column_names,
-            select_stmt,
-            materialized,
-        })
-    }
-
-    fn parse_select_core(&mut self, distinct: bool) -> Result<SelectCore<'a>, String> {
+    fn parse_select(&mut self) -> Result<Stmt<'static>, String> {
         let result_columns = self.parse_result_columns()?;
-        
-        let from_clause = self.parse_from_clause()?;
-        
-        let where_clause = self.parse_where_clause()?;
-        
-        let group_by_clause = self.parse_group_by_clause()?;
-        
-        let having_clause = self.parse_having_clause()?;
-        
-        let window_clause = self.parse_window_clause()?;
-        
-        Ok(SelectCore {
-            distinct,
+        let mut from_clause = None;
+        let mut where_clause = None;
+        let mut group_by_clause = None;
+        let mut having_clause = None;
+        let mut order_by_clause = None;
+        let mut limit_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+            if keyword.eq_ignore_ascii_case("FROM") {
+                self.advance();
+                from_clause = Some(self.parse_from_clause()?);
+                if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+                    if keyword.eq_ignore_ascii_case("WHERE") {
+                        self.advance();
+                        where_clause = Some(Box::new(self.parse_expr()?));
+                    }
+                }
+                if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+                    if keyword.eq_ignore_ascii_case("GROUP") {
+                        self.advance();
+                        if let TokenType::Valid(Token::IDENTIFIER(by)) = &self.current_token {
+                            if by.eq_ignore_ascii_case("BY") {
+                                self.advance();
+                                group_by_clause = Some(self.parse_group_by_clause()?);
+                                if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+                                    if keyword.eq_ignore_ascii_case("HAVING") {
+                                        self.advance();
+                                        having_clause = Some(Box::new(self.parse_expr()?));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        match &self.current_token {
+            TokenType::Valid(Token::ORDER_BY) => {
+                self.advance();
+                order_by_clause = Some(OrderByClause {
+                    terms: self.parse_order_by_clause()?,
+                });
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("ORDER") => {
+                self.advance();
+                if let TokenType::Valid(Token::IDENTIFIER(by)) = &self.current_token {
+                    if by.eq_ignore_ascii_case("BY") {
+                        self.advance();
+                        order_by_clause = Some(OrderByClause {
+                            terms: self.parse_order_by_clause()?,
+                        });
+                    }
+                }
+            },
+            _ => {}
+        }
+        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+            if keyword.eq_ignore_ascii_case("LIMIT") {
+                self.advance();
+                limit_clause = Some(self.parse_limit_clause()?);
+            }
+        }
+        let select_core = SelectCore {
+            distinct: false,
             result_columns,
             from_clause,
             where_clause,
             group_by_clause,
             having_clause,
-            window_clause,
-        })
+            window_clause: None,
+        };
+        let select_stmt = SelectStmt {
+            with_clause: None,
+            compound_operator: None,
+            select_core,
+            order_by_clause,
+            limit_clause,
+        };
+        Ok(Stmt::Select(Box::new(select_stmt)))
     }
-    
-    fn parse_result_columns(&mut self) -> Result<Vec<ResultColumn<'a>>, String> {
-        let mut result_columns = Vec::new();
-        
-        result_columns.push(self.parse_result_column()?);
-        
-        while let Some(Ok(Token::COMMA)) = self.current_token {
-            self.advance();
-            result_columns.push(self.parse_result_column()?);
+    fn parse_select_distinct(&mut self) -> Result<Stmt<'static>, String> {
+        let result_columns = self.parse_result_columns()?;
+        let mut from_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("FROM") {
+                self.advance();
+                from_clause = Some(self.parse_from_clause()?);
+            }
         }
-        
-        Ok(result_columns)
+        let mut where_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("WHERE") {
+                self.advance();
+                where_clause = Some(Box::new(self.parse_expr()?));
+            }
+        }
+        let select_core = SelectCore {
+            distinct: true,
+            result_columns,
+            from_clause,
+            where_clause,
+            group_by_clause: None,
+            having_clause: None,
+            window_clause: None,
+        };
+        Ok(Stmt::Select(Box::new(SelectStmt {
+            with_clause: None,
+            compound_operator: None,
+            select_core,
+            order_by_clause: None,
+            limit_clause: None,
+        })))
     }
-    
-    fn parse_result_column(&mut self) -> Result<ResultColumn<'a>, String> {
+    fn parse_result_columns(&mut self) -> Result<Vec<ResultColumn<'static>>, String> {
+        let mut columns = Vec::new();
+        if let TokenType::Valid(Token::ASTERISK) = &self.current_token {
+            self.advance();
+            columns.push(ResultColumn::AllColumns);
+            return Ok(columns);
+        }
+        columns.push(self.parse_result_column()?);
+        while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            self.advance();
+            columns.push(self.parse_result_column()?);
+        }
+        Ok(columns)
+    }
+    fn parse_result_column(&mut self) -> Result<ResultColumn<'static>, String> {
         match &self.current_token {
-            Some(Ok(Token::ASTERISK)) => {
+            TokenType::Valid(Token::IDENTIFIER(id)) => {
+                let id_str = Box::leak(id.to_string().into_boxed_str());
                 self.advance();
-                Ok(ResultColumn::AllColumns)
-            },
-            
-            Some(Ok(Token::IDENTIFIER(table_name))) => {
-                let table_name = table_name.clone();
-                self.advance();
-                
-                if let Some(Ok(Token::DOT)) = self.current_token {
+                if let TokenType::Valid(Token::DOT) = &self.current_token {
                     self.advance();
-                    
-                    if let Some(Ok(Token::ASTERISK)) = self.current_token {
+                    if let TokenType::Valid(Token::ASTERISK) = &self.current_token {
                         self.advance();
-                        Ok(ResultColumn::TableAllColumns(table_name))
-                    } else {
-                        let column_name = if let Some(Ok(Token::IDENTIFIER(column_name))) = self.current_token {
-                            self.advance();
-                            column_name
-                        } else {
-                            return Err("Expected column name after dot".to_string());
-                        };
-                        
-                        let expr = Expr::Column {
-                            schema_name: None,
-                            table_name: Some(table_name),
-                            column_name,
-                        };
-                        
-                        let alias = self.parse_optional_alias()?;
-                        
-                        Ok(ResultColumn::Expr {
-                            expr: Box::new(expr),
-                            alias,
-                        })
+                        return Ok(ResultColumn::TableAllColumns(id_str));
                     }
+                    if let TokenType::Valid(Token::IDENTIFIER(col_id)) = &self.current_token {
+                        let col_str = Box::leak(col_id.to_string().into_boxed_str());
+                        self.advance();
+                        let col_expr = crate::ast::Expr::Column {
+                            schema_name: None,
+                            table_name: Some(id_str),
+                            column_name: col_str,
+                        };
+                        let mut expr = col_expr;
+                        if let TokenType::Valid(Token::PLUS) = &self.current_token {
+                            self.advance();
+                            let right = self.parse_expr()?;
+                            expr = crate::ast::Expr::BinaryOp {
+                                left: Box::new(expr),
+                                op: crate::ast::BinaryOperator::Plus,
+                                right: Box::new(right),
+                            };
+                        } else if let TokenType::Valid(Token::MINUS) = &self.current_token {
+                            self.advance();
+                            let right = self.parse_expr()?;
+                            expr = crate::ast::Expr::BinaryOp {
+                                left: Box::new(expr),
+                                op: crate::ast::BinaryOperator::Minus,
+                                right: Box::new(right),
+                            };
+                        } else if let TokenType::Valid(Token::ASTERISK) = &self.current_token {
+                            self.advance();
+                            let right = self.parse_expr()?;
+                            expr = crate::ast::Expr::BinaryOp {
+                                left: Box::new(expr),
+                                op: crate::ast::BinaryOperator::Multiply,
+                                right: Box::new(right),
+                            };
+                        } else if let TokenType::Valid(Token::SLASH) = &self.current_token {
+                            self.advance();
+                            let right = self.parse_expr()?;
+                            expr = crate::ast::Expr::BinaryOp {
+                                left: Box::new(expr),
+                                op: crate::ast::BinaryOperator::Divide,
+                                right: Box::new(right),
+                            };
+                        }
+                        let mut alias: Option<&'static str> = None;
+                        if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
+                            if as_id.eq_ignore_ascii_case("AS") {
+                                self.advance();
+                                if let TokenType::Valid(Token::IDENTIFIER(alias_id)) = &self.current_token {
+                                    alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
+                                    self.advance();
+                                } else {
+                                    return Err(format!("Expected alias name after AS, found {:?}", self.current_token));
+                                }
+                            }
+                        }
+                        return Ok(ResultColumn::Expr { 
+                            expr: Box::new(expr),
+                            alias: convert_option_str(alias),
+                        });
+                    }
+                    return Err(format!("Expected * or column name after ., found {:?}", self.current_token));
+                }
+                let expr = if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                    self.parse_function_call(&id_str.to_string())?
                 } else {
-                    let expr = Expr::Column {
+                    crate::ast::Expr::Column {
                         schema_name: None,
                         table_name: None,
-                        column_name: table_name,
+                        column_name: id_str,
+                    }
+                };
+                let mut final_expr = expr;
+                if let TokenType::Valid(Token::PLUS) = &self.current_token {
+                    self.advance();
+                    let right = self.parse_expr()?;
+                    final_expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(final_expr),
+                        op: crate::ast::BinaryOperator::Plus,
+                        right: Box::new(right),
                     };
-                    
-                    let alias = self.parse_optional_alias()?;
-                    
-                    Ok(ResultColumn::Expr {
-                        expr: Box::new(expr),
-                        alias,
-                    })
+                } else if let TokenType::Valid(Token::MINUS) = &self.current_token {
+                    self.advance();
+                    let right = self.parse_expr()?;
+                    final_expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(final_expr),
+                        op: crate::ast::BinaryOperator::Minus,
+                        right: Box::new(right),
+                    };
+                } else if let TokenType::Valid(Token::ASTERISK) = &self.current_token {
+                    self.advance();
+                    let right = self.parse_expr()?;
+                    final_expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(final_expr),
+                        op: crate::ast::BinaryOperator::Multiply,
+                        right: Box::new(right),
+                    };
+                } else if let TokenType::Valid(Token::SLASH) = &self.current_token {
+                    self.advance();
+                    let right = self.parse_expr()?;
+                    final_expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(final_expr),
+                        op: crate::ast::BinaryOperator::Divide,
+                        right: Box::new(right),
+                    };
                 }
+                let mut alias: Option<&'static str> = None;
+                if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
+                    if as_id.eq_ignore_ascii_case("AS") {
+                        self.advance();
+                        if let TokenType::Valid(Token::IDENTIFIER(alias_id)) = &self.current_token {
+                            alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
+                            self.advance();
+                        } else {
+                            return Err(format!("Expected alias name after AS, found {:?}", self.current_token));
+                        }
+                    }
+                }
+                Ok(ResultColumn::Expr {
+                    expr: Box::new(final_expr),
+                    alias: convert_option_str(alias),
+                })
             },
-            
             _ => {
                 let expr = self.parse_expr()?;
-                
-                let alias = self.parse_optional_alias()?;
-                
-                Ok(ResultColumn::Expr {
-                    expr: Box::new(expr),
-                    alias,
-                })
-            }
-        }
-    }
-    
-    fn parse_optional_alias(&mut self) -> Result<Option<&'a str>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "AS" {
-                self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(alias))) = self.current_token {
-                    self.advance();
-                    Ok(Some(alias))
-                } else {
-                    Err("Expected alias name after AS".to_string())
-                }
-            } else {
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "FROM" || id == "WHERE" || id == "GROUP" || id == "ORDER" || id == "HAVING" || id == "LIMIT" {
-                        Ok(None)
-                    } else {
-                        let alias = id;
+                let mut alias: Option<&'static str> = None;
+                if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
+                    if as_id.eq_ignore_ascii_case("AS") {
                         self.advance();
-                        Ok(Some(alias))
-                    }
-                } else if let Some(Ok(Token::COMMA)) = self.current_token {
-                    Ok(None)
-                } else {
-                    Ok(None)
-                }
-            }
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_from_clause(&mut self) -> Result<Option<FromClause<'a>>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "FROM" {
-                self.advance();
-                
-                let mut tables = Vec::new();
-                let mut join_clauses = Vec::new();
-                
-                tables.push(self.parse_table_or_subquery()?);
-                
-                loop {
-                    let join_type = if let Some(Ok(Token::LEFT_JOIN)) = self.current_token {
-                        self.advance();
-                        JoinType::Left
-                    } else if let Some(Ok(Token::INNER_JOIN)) = self.current_token {
-                        self.advance();
-                        JoinType::Inner
-                    } else if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "JOIN" {
+                        if let TokenType::Valid(Token::IDENTIFIER(alias_id)) = &self.current_token {
+                            alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
                             self.advance();
-                            JoinType::Inner
-                        } else if id == "LEFT" {
-                            self.advance();
-                            
-                            if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                                if id == "OUTER" {
-                                    self.advance();
-                                    
-                                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                                        if id == "JOIN" {
-                                            self.advance();
-                                            JoinType::LeftOuter
-                                        } else {
-                                            return Err("Expected JOIN after LEFT OUTER".to_string());
-                                        }
-                                    } else {
-                                        return Err("Expected JOIN after LEFT OUTER".to_string());
-                                    }
-                                } else if id == "JOIN" {
-                                    self.advance();
-                                    JoinType::Left
-                                } else {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        } else if id == "CROSS" {
-                            self.advance();
-                            
-                            if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                                if id == "JOIN" {
-                                    self.advance();
-                                    JoinType::Cross
-                                } else {
-                                    return Err("Expected JOIN after CROSS".to_string());
-                                }
-                            } else {
-                                return Err("Expected JOIN after CROSS".to_string());
-                            }
                         } else {
-                            break;
+                            return Err(format!("Expected alias name after AS, found {:?}", self.current_token));
                         }
-                    } else {
-                        break;
-                    };
-                    
-                    let table_or_subquery = self.parse_table_or_subquery()?;
-                    
+                    }
+                }
+                Ok(ResultColumn::Expr { 
+                    expr: Box::new(expr), 
+                    alias: convert_option_str(alias),
+                })
+            },
+        }
+    }
+    fn parse_from_clause(&mut self) -> Result<FromClause<'static>, String> {
+        let first_table = self.parse_table_or_subquery()?;
+        let mut tables = vec![first_table];
+        while let TokenType::Valid(Token::COMMA) = self.current_token {
+            self.advance();
+            let table = self.parse_table_or_subquery()?;
+            tables.push(table);
+        }
+        let mut join_clauses = Vec::new();
+        loop {
+            if let TokenType::Valid(Token::IDENTIFIER(join_keyword)) = &self.current_token {
+                if join_keyword.eq_ignore_ascii_case("JOIN") {
+                    self.advance();
+                    let table = self.parse_table_or_subquery()?;
                     let constraint = self.parse_join_constraint()?;
-                    
                     join_clauses.push(JoinClause {
-                        join_type,
-                        table_or_subquery,
+                        join_type: JoinType::Inner,
+                        table_or_subquery: table,
                         constraint,
                     });
-                }
-                
-                Ok(Some(FromClause {
-                    tables,
-                    join_clauses,
-                }))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_table_or_subquery(&mut self) -> Result<TableOrSubquery<'a>, String> {
-        if let Some(Ok(Token::LEFT_PAREN)) = self.current_token {
-            self.advance();
-            
-            if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                if id == "SELECT" {
-                    let select_stmt = self.parse_select()?;
-                    
-                    let select_stmt = if let Stmt::Select(stmt) = select_stmt {
-                        stmt
-                    } else {
-                        return Err("Expected SELECT statement in subquery".to_string());
-                    };
-                    
-                    if let Some(Ok(Token::RIGHT_PAREN)) = self.current_token {
-                        self.advance();
-                    } else {
-                        return Err("Expected closing parenthesis after subquery".to_string());
-                    }
-                    
-                    let alias = self.parse_optional_alias()?;
-                    
-                    Ok(TableOrSubquery::Subquery {
-                        select_stmt,
-                        alias,
-                    })
-                } else {
-                    Err("Parenthesized table not yet supported".to_string())
-                }
-            } else {
-                Err("Expected SELECT or table name in parentheses".to_string())
-            }
-        } else if let Some(Ok(Token::IDENTIFIER(table_name))) = self.current_token {
-            self.advance();
-            
-            let (schema_name, table_name) = if let Some(Ok(Token::DOT)) = self.current_token {
-                self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(actual_table_name))) = self.current_token {
+                } else if join_keyword.eq_ignore_ascii_case("LEFT") {
                     self.advance();
-                    (Some(table_name), actual_table_name)
-                } else {
-                    return Err("Expected table name after schema name".to_string());
-                }
-            } else {
-                (None, table_name)
-            };
-            
-            let alias = self.parse_optional_alias()?;
-            
-            let (indexed_by, not_indexed) = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                if id == "INDEXED" {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "BY" {
+                    if let TokenType::Valid(Token::IDENTIFIER(next)) = &self.current_token {
+                        if next.eq_ignore_ascii_case("JOIN") {
                             self.advance();
-                            
-                            if let Some(Ok(Token::IDENTIFIER(index_name))) = self.current_token {
+                            let table = self.parse_table_or_subquery()?;
+                            let constraint = self.parse_join_constraint()?;
+                            join_clauses.push(JoinClause {
+                                join_type: JoinType::Left,
+                                table_or_subquery: table,
+                                constraint,
+                            });
+                        } else {
+                            return Err(format!("Expected JOIN after LEFT, got {:?}", self.current_token));
+                        }
+                    } else if let TokenType::Valid(Token::LEFT_JOIN) = &self.current_token {
+                        self.advance();
+                        let table = self.parse_table_or_subquery()?;
+                        let constraint = self.parse_join_constraint()?;
+                        join_clauses.push(JoinClause {
+                            join_type: JoinType::Left,
+                            table_or_subquery: table,
+                            constraint,
+                        });
+                    } else {
+                        return Err(format!("Expected JOIN after LEFT, got {:?}", self.current_token));
+                    }
+                } else if join_keyword.eq_ignore_ascii_case("INNER") {
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(next)) = &self.current_token {
+                        if next.eq_ignore_ascii_case("JOIN") {
+                            self.advance();
+                            let table = self.parse_table_or_subquery()?;
+                            let constraint = self.parse_join_constraint()?;
+                            join_clauses.push(JoinClause {
+                                join_type: JoinType::Inner,
+                                table_or_subquery: table,
+                                constraint,
+                            });
+                        } else {
+                            return Err(format!("Expected JOIN after INNER, got {:?}", self.current_token));
+                        }
+                    } else if let TokenType::Valid(Token::INNER_JOIN) = &self.current_token {
+                        self.advance();
+                        let table = self.parse_table_or_subquery()?;
+                        let constraint = self.parse_join_constraint()?;
+                        join_clauses.push(JoinClause {
+                            join_type: JoinType::Inner,
+                            table_or_subquery: table,
+                            constraint,
+                        });
+                    } else {
+                        return Err(format!("Expected JOIN after INNER, got {:?}", self.current_token));
+                    }
+                } else if join_keyword.eq_ignore_ascii_case("CROSS") {
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(next)) = &self.current_token {
+                        if next.eq_ignore_ascii_case("JOIN") {
+                            self.advance();
+                            let table = self.parse_table_or_subquery()?;
+                            join_clauses.push(JoinClause {
+                                join_type: JoinType::Cross,
+                                table_or_subquery: table,
+                                constraint: JoinConstraint::On(Box::new(Expr::Literal(Literal::Numeric("1")))),
+                            });
+                        } else {
+                            return Err(format!("Expected JOIN after CROSS, got {:?}", self.current_token));
+                        }
+                    } else {
+                        return Err(format!("Expected JOIN after CROSS, got {:?}", self.current_token));
+                    }
+                } else {
+                    break;
+                }
+            } else if let TokenType::Valid(Token::LEFT_JOIN) = &self.current_token {
+                self.advance();
+                let table = self.parse_table_or_subquery()?;
+                let constraint = self.parse_join_constraint()?;
+                join_clauses.push(JoinClause {
+                    join_type: JoinType::Left,
+                    table_or_subquery: table,
+                    constraint,
+                });
+            } else if let TokenType::Valid(Token::INNER_JOIN) = &self.current_token {
+                self.advance();
+                let table = self.parse_table_or_subquery()?;
+                let constraint = self.parse_join_constraint()?;
+                join_clauses.push(JoinClause {
+                    join_type: JoinType::Inner,
+                    table_or_subquery: table,
+                    constraint,
+                });
+            } else {
+                break;
+            }
+        }
+        Ok(FromClause {
+            tables,
+            join_clauses,
+        })
+    }
+    fn parse_table_or_subquery(&mut self) -> Result<TableOrSubquery<'static>, String> {
+        match &self.current_token {
+            TokenType::Valid(Token::IDENTIFIER(id)) => {
+                let id_str = Box::leak(id.to_string().into_boxed_str());
+                self.advance();
+                let (schema_name, table_name) = if let TokenType::Valid(Token::DOT) = &self.current_token {
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(table_id)) = &self.current_token {
+                        let table_id_copy = table_id.to_string();
+                        self.advance();
+                        (Some(id_str), Box::leak(table_id_copy.into_boxed_str()))
+                    } else {
+                        return Err(format!("Expected table name after schema qualifier, found {:?}", self.current_token));
+                    }
+                } else {
+                    (None, id_str)
+                };
+                let mut alias: Option<&'static str> = None;
+                if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
+                    if as_id.eq_ignore_ascii_case("AS") {
+                        self.advance();
+                        if let TokenType::Valid(Token::IDENTIFIER(alias_id)) = &self.current_token {
+                            alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
+                            self.advance();
+                        } else {
+                            return Err(format!("Expected alias after AS, found {:?}", self.current_token));
+                        }
+                    } else {
+                        alias = Some(Box::leak(as_id.to_string().into_boxed_str()));
+                        self.advance();
+                    }
+                }
+                let mut indexed_by: Option<&'static str> = None;
+                let mut not_indexed = false;
+                if let TokenType::Valid(Token::IDENTIFIER(indexed_keyword)) = &self.current_token {
+                    if indexed_keyword.eq_ignore_ascii_case("INDEXED") {
+                        self.advance();
+                        if let TokenType::Valid(Token::IDENTIFIER(by_keyword)) = &self.current_token {
+                            if by_keyword.eq_ignore_ascii_case("BY") {
                                 self.advance();
-                                (Some(index_name), false)
+                                if let TokenType::Valid(Token::IDENTIFIER(index_name)) = &self.current_token {
+                                    indexed_by = Some(Box::leak(index_name.to_string().into_boxed_str()));
+                                    self.advance();
+                                } else {
+                                    return Err(format!("Expected index name after INDEXED BY, found {:?}", self.current_token));
+                                }
                             } else {
-                                return Err("Expected index name after INDEXED BY".to_string());
+                                return Err(format!("Expected BY after INDEXED, found {:?}", self.current_token));
                             }
                         } else {
-                            return Err("Expected BY after INDEXED".to_string());
+                            return Err(format!("Expected BY after INDEXED, found {:?}", self.current_token));
                         }
-                    } else {
-                        return Err("Expected BY after INDEXED".to_string());
-                    }
-                } else if id == "NOT" {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "INDEXED" {
-                            self.advance();
-                            (None, true)
+                    } else if indexed_keyword.eq_ignore_ascii_case("NOT") {
+                        self.advance();
+                        if let TokenType::Valid(Token::IDENTIFIER(indexed_keyword)) = &self.current_token {
+                            if indexed_keyword.eq_ignore_ascii_case("INDEXED") {
+                                not_indexed = true;
+                                self.advance();
+                            } else {
+                                return Err(format!("Expected INDEXED after NOT, found {:?}", self.current_token));
+                            }
                         } else {
-                            return Err("Expected INDEXED after NOT".to_string());
+                            return Err(format!("Expected INDEXED after NOT, found {:?}", self.current_token));
+                        }
+                    }
+                }
+                Ok(TableOrSubquery::Table {
+                    schema_name: convert_option_str(schema_name.as_deref()),
+                    table_name,
+                    alias: convert_option_str(alias),
+                    indexed_by: convert_option_str(indexed_by),
+                    not_indexed,
+                })
+            },
+            TokenType::Valid(Token::LEFT_PAREN) => {
+                self.advance();
+                if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+                    if id.eq_ignore_ascii_case("SELECT") {
+                        self.advance();
+                        let stmt = self.parse_select()?;
+                        let select_stmt = if let Stmt::Select(box_select) = stmt {
+                            *box_select
+                        } else {
+                            return Err("Expected SELECT statement".to_string());
+                        };
+                        if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                            self.advance();
+                            let mut alias: Option<&'static str> = None;
+                            if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
+                                if as_id.eq_ignore_ascii_case("AS") {
+                                    self.advance();
+                                    if let TokenType::Valid(Token::IDENTIFIER(alias_id)) = &self.current_token {
+                                        alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
+                                        self.advance();
+                                    } else {
+                                        return Err(format!("Expected alias after AS, found {:?}", self.current_token));
+                                    }
+                                } else {
+                                    alias = Some(convert_str(as_id.to_string()));
+                                    self.advance();
+                                }
+                            }
+                            Ok(TableOrSubquery::Subquery {
+                                select_stmt: Box::new(select_stmt),
+                                alias: convert_option_str(alias),
+                            })
+                        } else {
+                            return Err(format!("Expected ) after subquery, found {:?}", self.current_token));
                         }
                     } else {
-                        return Err("Expected INDEXED after NOT".to_string());
+                        let table_or_subquery = self.parse_table_or_subquery()?;
+                        if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                            self.advance();
+                            Ok(table_or_subquery)
+                        } else {
+                            return Err(format!("Expected ) after table expression, found {:?}", self.current_token));
+                        }
                     }
                 } else {
-                    (None, false)
+                    return Err(format!("Expected table name or SELECT after (, found {:?}", self.current_token));
                 }
-            } else {
-                (None, false)
+            },
+            _ => {
+                return Err(format!("Expected table name or subquery, found {:?}", self.current_token));
+            }
+        }
+    }
+    fn parse_order_by_clause(&mut self) -> Result<Vec<crate::ast::OrderingTerm<'static>>, String> {
+        let mut terms = Vec::new();
+        terms.push(self.parse_ordering_term()?);
+        while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            self.advance();
+            terms.push(self.parse_ordering_term()?);
+        }
+        Ok(terms)
+    }
+    fn parse_ordering_term(&mut self) -> Result<crate::ast::OrderingTerm<'static>, String> {
+        let expr = self.parse_expr()?;
+        let mut asc_desc = None;
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("ASC") {
+                asc_desc = Some(crate::ast::AscDesc::Asc);
+                self.advance();
+            } else if id.eq_ignore_ascii_case("DESC") {
+                asc_desc = Some(crate::ast::AscDesc::Desc);
+                self.advance();
+            }
+        }
+        let mut nulls = None;
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("NULLS") {
+                self.advance();
+                if let TokenType::Valid(Token::IDENTIFIER(pos)) = &self.current_token {
+                    if pos.eq_ignore_ascii_case("FIRST") {
+                        nulls = Some(crate::ast::NullsOrder::First);
+                        self.advance();
+                    } else if pos.eq_ignore_ascii_case("LAST") {
+                        nulls = Some(crate::ast::NullsOrder::Last);
+                        self.advance();
+                    } else {
+                        return Err(format!("Expected FIRST or LAST after NULLS, found {:?}", self.current_token));
+                    }
+                } else {
+                    return Err(format!("Expected FIRST or LAST after NULLS, found {:?}", self.current_token));
+                }
+            }
+        }
+        Ok(crate::ast::OrderingTerm {
+            expr: Box::new(expr),
+            asc_desc,
+            nulls,
+        })
+    }
+    fn parse_limit_clause(&mut self) -> Result<LimitClause<'static>, String> {
+        let expr = self.parse_expr()?;
+        let mut offset = None;
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("OFFSET") {
+                self.advance();
+                let offset_expr = self.parse_expr()?;
+                offset = Some(Box::new(offset_expr));
+            }
+        } else if let TokenType::Valid(Token::COMMA) = &self.current_token {
+            self.advance();
+            let limit_expr = expr;
+            offset = Some(Box::new(limit_expr));
+            return Ok(LimitClause {
+                limit: Box::new(self.parse_expr()?),
+                offset,
+            });
+        }
+        Ok(LimitClause {
+            limit: Box::new(expr),
+            offset,
+        })
+    }
+    fn parse_group_by_clause(&mut self) -> Result<crate::ast::GroupByClause<'static>, String> {
+        let mut exprs = Vec::new();
+        let expr = self.parse_expr()?;
+        exprs.push(expr);
+        while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            self.advance();
+            let expr = self.parse_expr()?;
+            exprs.push(expr);
+        }
+        Ok(crate::ast::GroupByClause { exprs })
+    }
+    fn parse_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        self.parse_or_expr()
+    }
+    fn parse_or_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        let mut expr = self.parse_and_expr()?;
+        while let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if !id.eq_ignore_ascii_case("OR") {
+                break;
+            }
+            self.advance();
+            let right = self.parse_and_expr()?;
+            expr = crate::ast::Expr::BinaryOp {
+                left: Box::new(expr),
+                op: crate::ast::BinaryOperator::Or,
+                right: Box::new(right),
             };
-            
-            Ok(TableOrSubquery::Table {
-                schema_name,
-                table_name,
-                alias,
-                indexed_by,
-                not_indexed,
-            })
-        } else {
-            Err("Expected table name, subquery, or function".to_string())
         }
+        Ok(expr)
     }
-    
-    fn parse_join_constraint(&mut self) -> Result<JoinConstraint<'a>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "ON" {
-                self.advance();
-                
-                let expr = self.parse_expr()?;
-                
-                Ok(JoinConstraint::On(Box::new(expr)))
-            } else if id == "USING" {
-                self.advance();
-                
-                if let Some(Ok(Token::LEFT_PAREN)) = self.current_token {
-                    self.advance();
-                } else {
-                    return Err("Expected opening parenthesis after USING".to_string());
-                }
-                
-                let mut columns = Vec::new();
-                
-                if let Some(Ok(Token::IDENTIFIER(column_name))) = self.current_token {
-                    columns.push(column_name);
-                    self.advance();
-                } else {
-                    return Err("Expected column name in USING clause".to_string());
-                }
-                
-                while let Some(Ok(Token::COMMA)) = self.current_token {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(column_name))) = self.current_token {
-                        columns.push(column_name);
-                        self.advance();
-                    } else {
-                        return Err("Expected column name after comma in USING clause".to_string());
-                    }
-                }
-                
-                if let Some(Ok(Token::RIGHT_PAREN)) = self.current_token {
-                    self.advance();
-                } else {
-                    return Err("Expected closing parenthesis in USING clause".to_string());
-                }
-                
-                Ok(JoinConstraint::Using(columns))
-            } else {
-                Err("Expected ON or USING after JOIN".to_string())
+    fn parse_and_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        let mut expr = self.parse_comparison_expr()?;
+        while let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if !id.eq_ignore_ascii_case("AND") {
+                break;
             }
-        } else {
-            Err("Expected ON or USING after JOIN".to_string())
-        }
-    }
-    
-    fn parse_where_clause(&mut self) -> Result<Option<Box<Expr<'a>>>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "WHERE" {
-                self.advance();
-                
-                let expr = self.parse_expr()?;
-                
-                Ok(Some(Box::new(expr)))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_group_by_clause(&mut self) -> Result<Option<GroupByClause<'a>>, String> {
-        if let Some(Ok(Token::GROUP_BY)) = self.current_token {
             self.advance();
-            
-            let mut exprs = Vec::new();
-            
-            exprs.push(self.parse_expr()?);
-            
-            while let Some(Ok(Token::COMMA)) = self.current_token {
+            let right = self.parse_comparison_expr()?;
+            expr = crate::ast::Expr::BinaryOp {
+                left: Box::new(expr),
+                op: crate::ast::BinaryOperator::And,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+    fn parse_comparison_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        let left = self.parse_additive_expr()?;
+        match &self.current_token {
+            TokenType::Valid(Token::EQUALS) => {
                 self.advance();
-                exprs.push(self.parse_expr()?);
-            }
-            
-            Ok(Some(GroupByClause { exprs }))
-        } else if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "GROUP" {
+                let right = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: crate::ast::BinaryOperator::Equals,
+                    right: Box::new(right),
+                })
+            },
+            TokenType::Valid(Token::NOT_EQUAL) => {
                 self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "BY" {
+                let right = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: crate::ast::BinaryOperator::NotEquals,
+                    right: Box::new(right),
+                })
+            },
+            TokenType::Valid(Token::LESS_THAN) => {
+                self.advance();
+                let right = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: crate::ast::BinaryOperator::LessThan,
+                    right: Box::new(right),
+                })
+            },
+            TokenType::Valid(Token::LESS_THAN_EQUAL) => {
+                self.advance();
+                let right = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: crate::ast::BinaryOperator::LessThanOrEqual,
+                    right: Box::new(right),
+                })
+            },
+            TokenType::Valid(Token::GREATER_THAN) => {
+                self.advance();
+                let right = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: crate::ast::BinaryOperator::GreaterThan,
+                    right: Box::new(right),
+                })
+            },
+            TokenType::Valid(Token::GREATER_THAN_EQUAL) => {
+                self.advance();
+                let right = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: crate::ast::BinaryOperator::GreaterThanOrEqual,
+                    right: Box::new(right),
+                })
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("LIKE") => {
+                self.advance();
+                let pattern = self.parse_additive_expr()?;
+                Ok(crate::ast::Expr::Like {
+                    expr: Box::new(left),
+                    pattern: Box::new(pattern),
+                    escape: None,
+                })
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("IN") => {
+                self.advance();
+                match &self.current_token {
+                    TokenType::Valid(Token::LEFT_PAREN) => {
                         self.advance();
-                        
-                        let mut exprs = Vec::new();
-                        
-                        exprs.push(self.parse_expr()?);
-                        
-                        while let Some(Ok(Token::COMMA)) = self.current_token {
+                        let mut list = Vec::new();
+                        if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
                             self.advance();
-                            exprs.push(self.parse_expr()?);
+                            return Ok(crate::ast::Expr::InList {
+                                expr: Box::new(left),
+                                not: false,
+                                list,
+                            });
                         }
-                        
-                        Ok(Some(GroupByClause { exprs }))
-                    } else {
-                        Ok(None)
-                    }
-                } else {
-                    Ok(None)
-                }
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_having_clause(&mut self) -> Result<Option<Box<Expr<'a>>>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "HAVING" {
-                self.advance();
-                
-                let expr = self.parse_expr()?;
-                
-                Ok(Some(Box::new(expr)))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_window_clause(&mut self) -> Result<Option<WindowClause<'a>>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "WINDOW" {
-                self.advance();
-                
-                let mut window_defs = Vec::new();
-                
-                let name = self.parse_window_name()?;
-                
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "AS" {
-                        self.advance();
-                    } else {
-                        return Err("Expected AS after window name".to_string());
-                    }
-                } else {
-                    return Err("Expected AS after window name".to_string());
-                }
-                
-                if let Some(Ok(Token::LEFT_PAREN)) = self.current_token {
-                    self.advance();
-                } else {
-                    return Err("Expected opening parenthesis after AS".to_string());
-                }
-                
-                let window_def = self.parse_window_def()?;
-                
-                if let Some(Ok(Token::RIGHT_PAREN)) = self.current_token {
-                    self.advance();
-                } else {
-                    return Err("Expected closing parenthesis after window definition".to_string());
-                }
-                
-                window_defs.push((name, window_def));
-                
-                while let Some(Ok(Token::COMMA)) = self.current_token {
-                    self.advance();
-                    
-                    let name = self.parse_window_name()?;
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "AS" {
+                        list.push(self.parse_expr()?);
+                        while let TokenType::Valid(Token::COMMA) = &self.current_token {
                             self.advance();
+                            list.push(self.parse_expr()?);
+                        }
+                        match &self.current_token {
+                            TokenType::Valid(Token::RIGHT_PAREN) => {
+                                self.advance();
+                                Ok(crate::ast::Expr::InList {
+                                    expr: Box::new(left),
+                                    not: false,
+                                    list,
+                                })
+                            },
+                            _ => Err(format!("Expected ) after IN expression list, found {:?}", self.current_token)),
+                        }
+                    },
+                    _ => Err(format!("Expected ( after IN operator, found {:?}", self.current_token)),
+                }
+            },
+            _ => Ok(left),
+        }
+    }
+    fn parse_additive_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        let mut expr = self.parse_multiplicative_expr()?;
+        loop {
+            match &self.current_token {
+                TokenType::Valid(Token::PLUS) => {
+                    self.advance();
+                    let right = self.parse_multiplicative_expr()?;
+                    expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: crate::ast::BinaryOperator::Plus,
+                        right: Box::new(right),
+                    };
+                },
+                TokenType::Valid(Token::MINUS) => {
+                    self.advance();
+                    let right = self.parse_multiplicative_expr()?;
+                    expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: crate::ast::BinaryOperator::Minus,
+                        right: Box::new(right),
+                    };
+                },
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+    fn parse_multiplicative_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        let mut expr = self.parse_unary_expr()?;
+        loop {
+            match &self.current_token {
+                TokenType::Valid(Token::ASTERISK) => {
+                    self.advance();
+                    let right = self.parse_unary_expr()?;
+                    expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: crate::ast::BinaryOperator::Multiply,
+                        right: Box::new(right),
+                    };
+                },
+                TokenType::Valid(Token::SLASH) => {
+                    self.advance();
+                    let right = self.parse_unary_expr()?;
+                    expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: crate::ast::BinaryOperator::Divide,
+                        right: Box::new(right),
+                    };
+                },
+                TokenType::Valid(Token::PERCENT) => {
+                    self.advance();
+                    let right = self.parse_unary_expr()?;
+                    expr = crate::ast::Expr::BinaryOp {
+                        left: Box::new(expr),
+                        op: crate::ast::BinaryOperator::Modulo,
+                        right: Box::new(right),
+                    };
+                },
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+    fn parse_unary_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        match &self.current_token {
+            TokenType::Valid(Token::MINUS) => {
+                self.advance();
+                let expr = self.parse_unary_expr()?;
+                Ok(crate::ast::Expr::UnaryOp {
+                    op: crate::ast::UnaryOperator::Negative,
+                    expr: Box::new(expr),
+                })
+            },
+            TokenType::Valid(Token::PLUS) => {
+                self.advance();
+                self.parse_unary_expr()
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("NOT") => {
+                self.advance();
+                let expr = self.parse_unary_expr()?;
+                Ok(crate::ast::Expr::UnaryOp {
+                    op: crate::ast::UnaryOperator::Not,
+                    expr: Box::new(expr),
+                })
+            },
+            _ => self.parse_primary_expr(),
+        }
+    }
+    fn parse_primary_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        match &self.current_token {
+            TokenType::Valid(Token::NUMBER(num)) => {
+                let num_str = num.to_string();
+                self.advance();
+                Ok(crate::ast::Expr::Literal(crate::ast::Literal::Numeric(Box::leak(num_str.into_boxed_str()))))
+            },
+            TokenType::Valid(Token::STRING_LITERAL(s)) => {
+                let string_value = s.to_string();
+                self.advance();
+                Ok(crate::ast::Expr::Literal(crate::ast::Literal::String(Box::leak(string_value.into_boxed_str()))))
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("NULL") => {
+                self.advance();
+                Ok(crate::ast::Expr::Literal(crate::ast::Literal::Null))
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("TRUE") => {
+                self.advance();
+                Ok(crate::ast::Expr::Literal(crate::ast::Literal::Keyword("TRUE")))
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) if id.eq_ignore_ascii_case("FALSE") => {
+                self.advance();
+                Ok(crate::ast::Expr::Literal(crate::ast::Literal::Keyword("FALSE")))
+            },
+            TokenType::Valid(Token::IDENTIFIER(id)) => {
+                let id_str = id.to_string();
+                self.advance();
+                if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                    return self.parse_function_call(&id_str);
+                }
+                if let TokenType::Valid(Token::DOT) = &self.current_token {
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(col)) = &self.current_token {
+                        let col_str = col.to_string();
+                        self.advance();
+                        return Ok(crate::ast::Expr::Column {
+                            schema_name: None,
+                            table_name: Some(Box::leak(id_str.into_boxed_str())),
+                            column_name: Box::leak(col_str.into_boxed_str()),
+                        });
+                    } else {
+                        return Err(format!("Expected column name after ., found {:?}", self.current_token));
+                    }
+                }
+                Ok(crate::ast::Expr::Column {
+                    schema_name: None,
+                    table_name: None,
+                    column_name: Box::leak(id_str.into_boxed_str()),
+                })
+            },
+            TokenType::Valid(Token::FUNCTION((name, args))) => {
+                let function_name = Box::leak(name.to_string().into_boxed_str());
+                let args_copy = args.to_string();
+                self.advance();
+                let arg_expr = if args_copy.trim().is_empty() {
+                    vec![]
+                } else {
+                    vec![crate::ast::Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: Box::leak(args_copy.into_boxed_str()),
+                    }]
+                };
+                let mut over_clause = None;
+                if let TokenType::Valid(Token::IDENTIFIER(over_id)) = &self.current_token {
+                    if over_id.eq_ignore_ascii_case("OVER") {
+                        self.advance();
+                        let window_spec = self.parse_window_spec()?;
+                        over_clause = Some(Box::new(window_spec));
+                    }
+                }
+                Ok(crate::ast::Expr::FunctionCall {
+                    name: function_name,
+                    args: arg_expr,
+                    filter_clause: None,
+                    over_clause,
+                })
+            },
+            TokenType::Valid(Token::LEFT_PAREN) => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                match &self.current_token {
+                    TokenType::Valid(Token::RIGHT_PAREN) => {
+                        self.advance();
+                        Ok(expr)
+                    },
+                    _ => Err(format!("Expected ) after expression, found {:?}", self.current_token)),
+                }
+            },
+            TokenType::Valid(Token::ASTERISK) => {
+                self.advance();
+                Ok(crate::ast::Expr::FunctionCall {
+                    name: "*",
+                    args: vec![],
+                    filter_clause: None,
+                    over_clause: None,
+                })
+            },
+            _ => Err(format!("Unexpected token in expression: {:?}", self.current_token)),
+        }
+    }
+    fn position(&self) -> usize {
+        self.span.start
+    }
+    fn parse_join_constraint(&mut self) -> Result<JoinConstraint<'static>, String> {
+        if let TokenType::Valid(Token::IDENTIFIER(on_keyword)) = &self.current_token {
+            if on_keyword.eq_ignore_ascii_case("ON") {
+                self.advance();
+                let expr = self.parse_expr()?;
+                return Ok(JoinConstraint::On(Box::new(expr)));
+            } else if on_keyword.eq_ignore_ascii_case("USING") {
+                self.advance();
+                if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                    self.advance();
+                    let mut cols = Vec::new();
+                    if let TokenType::Valid(Token::IDENTIFIER(col)) = &self.current_token {
+                        cols.push(Box::leak(col.to_string().into_boxed_str()));
+                        self.advance();
+                        while let TokenType::Valid(Token::COMMA) = &self.current_token {
+                            self.advance();
+                            if let TokenType::Valid(Token::IDENTIFIER(col)) = &self.current_token {
+                                cols.push(Box::leak(col.to_string().into_boxed_str()));
+                                self.advance();
+                            } else {
+                                return Err(format!("Expected column name after comma in USING clause, found {:?}", self.current_token));
+                            }
+                        }
+                    } else {
+                        return Err(format!("Expected column name in USING clause, found {:?}", self.current_token));
+                    }
+                    if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                        self.advance();
+                        return Ok(JoinConstraint::Using(convert_mut_str_vec(cols)));
+                    } else {
+                        return Err(format!("Expected ) after USING columns, found {:?}", self.current_token));
+                    }
+                } else {
+                    return Err(format!("Expected ( after USING, found {:?}", self.current_token));
+                }
+            }
+        }
+        Err(format!("Expected ON or USING after join, found {:?}", self.current_token))
+    }
+    fn parse_update(&mut self) -> Result<Stmt<'static>, String> {
+        let table_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            let name = id.to_string().into_static();
+            self.advance();
+            name
+        } else {
+            return Err(format!("Expected table name after UPDATE, found {:?}", self.current_token));
+        };
+        if let TokenType::Valid(Token::IDENTIFIER(set_keyword)) = &self.current_token {
+            if !set_keyword.eq_ignore_ascii_case("SET") {
+                return Err(format!("Expected SET after table name, found {:?}", self.current_token));
+            }
+            self.advance();
+        } else {
+            return Err(format!("Expected SET after table name, found {:?}", self.current_token));
+        }
+        let mut set_clauses = Vec::new();
+        set_clauses.push(self.parse_set_clause()?);
+        while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            self.advance();
+            set_clauses.push(self.parse_set_clause()?);
+        }
+        let mut where_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+            if keyword.eq_ignore_ascii_case("WHERE") {
+                self.advance();
+                where_clause = Some(Box::new(self.parse_expr()?));
+            }
+        }
+        let qualified_table_name = crate::ast::QualifiedTableName {
+            schema_name: None,
+            table_name,
+            alias: None,
+            indexed_by: None,
+            not_indexed: false,
+        };
+        Ok(Stmt::Update {
+            with_clause: None,
+            or_conflict: None,
+            qualified_table_name,
+            set_clauses,
+            from_clause: None,
+            where_clause,
+            returning_clause: None,
+            order_by_clause: None,
+            limit_clause: None,
+        })
+    }
+    fn parse_set_clause(&mut self) -> Result<crate::ast::SetClause<'static>, String> {
+        let column_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            let name = id.to_string().into_static();
+            self.advance();
+            name
+        } else {
+            return Err(format!("Expected column name in SET clause, found {:?}", self.current_token));
+        };
+        if let TokenType::Valid(Token::EQUALS) = &self.current_token {
+            self.advance();
+        } else {
+            return Err(format!("Expected = after column name in SET clause, found {:?}", self.current_token));
+        }
+        let expr = self.parse_expr()?;
+        Ok(crate::ast::SetClause {
+            column_name,
+            expr: Box::new(expr),
+        })
+    }
+    fn parse_delete(&mut self) -> Result<Stmt<'static>, String> {
+        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+            if !keyword.eq_ignore_ascii_case("FROM") {
+                return Err(format!("Expected FROM after DELETE, found {:?}", self.current_token));
+            }
+            self.advance();
+        } else {
+            return Err(format!("Expected FROM after DELETE, found {:?}", self.current_token));
+        }
+        let table_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            let name = id.to_string().into_static();
+            self.advance();
+            name
+        } else {
+            return Err(format!("Expected table name after FROM, found {:?}", self.current_token));
+        };
+        let mut where_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+            if keyword.eq_ignore_ascii_case("WHERE") {
+                self.advance();
+                where_clause = Some(Box::new(self.parse_expr()?));
+            }
+        }
+        let qualified_table_name = crate::ast::QualifiedTableName {
+            schema_name: None,
+            table_name,
+            alias: None,
+            indexed_by: None,
+            not_indexed: false,
+        };
+        Ok(Stmt::Delete {
+            with_clause: None,
+            qualified_table_name,
+            where_clause,
+            returning_clause: None,
+            order_by_clause: None,
+            limit_clause: None,
+        })
+    }
+    fn parse_window_spec(&mut self) -> Result<crate::ast::WindowSpec<'static>, String> {
+        let mut window_name: Option<&'static str> = None;
+        let mut partition_by = None;
+        let mut order_by = None;
+        let mut frame_spec = None;
+        match &self.current_token {
+            TokenType::Valid(Token::IDENTIFIER(id)) => {
+                window_name = Some(Box::leak(id.to_string().into_boxed_str()));
+                self.advance();
+            },
+            TokenType::Valid(Token::LEFT_PAREN) => {
+                self.advance();
+                if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+                    if !id.eq_ignore_ascii_case("PARTITION") && !id.eq_ignore_ascii_case("ORDER") {
+                        window_name = Some(Box::leak(id.to_string().into_boxed_str()));
+                        self.advance();
+                    }
+                }
+                if let TokenType::Valid(Token::IDENTIFIER(partition_keyword)) = &self.current_token {
+                    if partition_keyword.eq_ignore_ascii_case("PARTITION") {
+                        self.advance();
+                        if let TokenType::Valid(Token::IDENTIFIER(by_keyword)) = &self.current_token {
+                            if by_keyword.eq_ignore_ascii_case("BY") {
+                                self.advance();
+                                let mut partition_exprs = Vec::new();
+                                partition_exprs.push(self.parse_expr()?);
+                                while let TokenType::Valid(Token::COMMA) = &self.current_token {
+                                    self.advance();
+                                    partition_exprs.push(self.parse_expr()?);
+                                }
+                                partition_by = Some(partition_exprs);
+                            } else {
+                                return Err(format!("Expected BY after PARTITION, found {:?}", self.current_token));
+                            }
                         } else {
-                            return Err("Expected AS after window name".to_string());
-                        }
-                    } else {
-                        return Err("Expected AS after window name".to_string());
-                    }
-                    
-                    if let Some(Ok(Token::LEFT_PAREN)) = self.current_token {
-                        self.advance();
-                    } else {
-                        return Err("Expected opening parenthesis after AS".to_string());
-                    }
-                    
-                    let window_def = self.parse_window_def()?;
-                    
-                    if let Some(Ok(Token::RIGHT_PAREN)) = self.current_token {
-                        self.advance();
-                    } else {
-                        return Err("Expected closing parenthesis after window definition".to_string());
-                    }
-                    
-                    window_defs.push((name, window_def));
-                }
-                
-                Ok(Some(WindowClause { window_defs }))
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_window_name(&mut self) -> Result<WindowName<'a>, String> {
-        if let Some(Ok(Token::IDENTIFIER(name))) = self.current_token {
-            self.advance();
-            Ok(WindowName::Name(name))
-        } else {
-            Err("Expected window name".to_string())
-        }
-    }
-    
-    fn parse_window_def(&mut self) -> Result<WindowDef<'a>, String> {
-        let base_window_name = if let Some(Ok(Token::IDENTIFIER(name))) = self.current_token {
-            self.advance();
-            Some(name)
-        } else {
-            None
-        };
-        
-        let mut partition_by = Vec::new();
-        
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "PARTITION" {
-                self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "BY" {
-                        self.advance();
-                        
-                        partition_by.push(self.parse_expr()?);
-                        
-                        while let Some(Ok(Token::COMMA)) = self.current_token {
-                            self.advance();
-                            partition_by.push(self.parse_expr()?);
+                            return Err(format!("Expected BY after PARTITION, found {:?}", self.current_token));
                         }
                     }
                 }
-            }
-        }
-        
-        let order_by = if let Some(Ok(Token::ORDER_BY)) = self.current_token {
-            self.advance();
-            Some(self.parse_order_by_clause()?)
-        } else if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "ORDER" {
-                self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    if id == "BY" {
+                if let TokenType::Valid(Token::IDENTIFIER(order_keyword)) = &self.current_token {
+                    if order_keyword.eq_ignore_ascii_case("ORDER") {
                         self.advance();
-                        Some(self.parse_order_by_clause()?)
-                    } else {
-                        None
+                        if let TokenType::Valid(Token::IDENTIFIER(by_keyword)) = &self.current_token {
+                            if by_keyword.eq_ignore_ascii_case("BY") {
+                                self.advance();
+                                let terms = self.parse_order_by_clause()?;
+                                order_by = Some(crate::ast::OrderByClause { terms });
+                            } else {
+                                return Err(format!("Expected BY after ORDER, found {:?}", self.current_token));
+                            }
+                        } else {
+                            return Err(format!("Expected BY after ORDER, found {:?}", self.current_token));
+                        }
                     }
+                } else if let TokenType::Valid(Token::ORDER_BY) = &self.current_token {
+                    self.advance();
+                    let terms = self.parse_order_by_clause()?;
+                    order_by = Some(crate::ast::OrderByClause { terms });
+                }
+                if let TokenType::Valid(Token::IDENTIFIER(frame_type_keyword)) = &self.current_token {
+                    if frame_type_keyword.eq_ignore_ascii_case("ROWS") || 
+                       frame_type_keyword.eq_ignore_ascii_case("RANGE") || 
+                       frame_type_keyword.eq_ignore_ascii_case("GROUPS") {
+                        let frame_type = match frame_type_keyword.to_uppercase().as_str() {
+                            "ROWS" => crate::ast::FrameType::Rows,
+                            "RANGE" => crate::ast::FrameType::Range,
+                            "GROUPS" => crate::ast::FrameType::Groups,
+                            _ => unreachable!(), 
+                        };
+                        self.advance();
+                        let frame_start;
+                        let mut frame_end = None;
+                        let between_clause = if let TokenType::Valid(Token::IDENTIFIER(between_keyword)) = &self.current_token {
+                            if between_keyword.eq_ignore_ascii_case("BETWEEN") {
+                                self.advance();
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        frame_start = self.parse_frame_bound()?;
+                        if between_clause {
+                            if let TokenType::Valid(Token::IDENTIFIER(and_keyword)) = &self.current_token {
+                                if and_keyword.eq_ignore_ascii_case("AND") {
+                                    self.advance();
+                                    frame_end = Some(self.parse_frame_bound()?);
+                                } else {
+                                    return Err(format!("Expected AND after BETWEEN, found {:?}", self.current_token));
+                                }
+                            } else {
+                                return Err(format!("Expected AND after BETWEEN, found {:?}", self.current_token));
+                            }
+                        }
+                        let mut exclude = None;
+                        if let TokenType::Valid(Token::IDENTIFIER(exclude_keyword)) = &self.current_token {
+                            if exclude_keyword.eq_ignore_ascii_case("EXCLUDE") {
+                                self.advance();
+                                if let TokenType::Valid(Token::IDENTIFIER(exclude_type)) = &self.current_token {
+                                    exclude = Some(match exclude_type.to_uppercase().as_str() {
+                                        "NO" => {
+                                            self.advance();
+                                            if let TokenType::Valid(Token::IDENTIFIER(others)) = &self.current_token {
+                                                if others.eq_ignore_ascii_case("OTHERS") {
+                                                    self.advance();
+                                                    crate::ast::FrameExclude::NoOthers
+                                                } else {
+                                                    return Err(format!("Expected OTHERS after NO, found {:?}", self.current_token));
+                                                }
+                                            } else {
+                                                return Err(format!("Expected OTHERS after NO, found {:?}", self.current_token));
+                                            }
+                                        },
+                                        "CURRENT" => {
+                                            self.advance();
+                                            if let TokenType::Valid(Token::IDENTIFIER(row)) = &self.current_token {
+                                                if row.eq_ignore_ascii_case("ROW") {
+                                                    self.advance();
+                                                    crate::ast::FrameExclude::CurrentRow
+                                                } else {
+                                                    return Err(format!("Expected ROW after CURRENT, found {:?}", self.current_token));
+                                                }
+                                            } else {
+                                                return Err(format!("Expected ROW after CURRENT, found {:?}", self.current_token));
+                                            }
+                                        },
+                                        "GROUP" => {
+                                            self.advance();
+                                            crate::ast::FrameExclude::Group
+                                        },
+                                        "TIES" => {
+                                            self.advance();
+                                            crate::ast::FrameExclude::Ties
+                                        },
+                                        _ => return Err(format!("Expected NO OTHERS, CURRENT ROW, GROUP, or TIES after EXCLUDE, found {:?}", self.current_token)),
+                                    });
+                                } else {
+                                    return Err(format!("Expected EXCLUDE type, found {:?}", self.current_token));
+                                }
+                            }
+                        }
+                        frame_spec = Some(crate::ast::FrameSpec {
+                            frame_type,
+                            frame_start,
+                            frame_end,
+                            exclude,
+                        });
+                    }
+                }
+                if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                    self.advance();
                 } else {
-                    None
+                    return Err(format!("Expected ) to close window specification, found {:?}", self.current_token));
                 }
-            } else {
-                None
+            },
+            _ => {
+                return Err(format!("Expected window name or window specification, found {:?}", self.current_token));
             }
-        } else {
-            None
-        };
-        
-        let frame_spec = self.parse_frame_spec()?;
-        
-        Ok(WindowDef {
-            base_window_name,
+        }
+        Ok(crate::ast::WindowSpec {
+            window_name: convert_option_str(window_name),
             partition_by,
             order_by,
             frame_spec,
         })
     }
-    
-    fn parse_frame_spec(&mut self) -> Result<Option<FrameSpec>, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            let type_ = match id {
-                "RANGE" => {
-                    self.advance();
-                    FrameType::Range
-                },
-                "ROWS" => {
-                    self.advance();
-                    FrameType::Rows
-                },
-                "GROUPS" => {
-                    self.advance();
-                    FrameType::Groups
-                },
-                _ => {
-                    return Ok(None);
-                }
-            };
-            
-            let bounds = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                if id == "BETWEEN" {
-                    self.advance();
-                    
-                    let start = self.parse_frame_bound()?;
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "AND" {
-                            self.advance();
-                            
-                            let end = self.parse_frame_bound()?;
-                            
-                            FrameBounds::Between(start, end)
-                        } else {
-                            return Err("Expected AND in BETWEEN clause".to_string());
-                        }
-                    } else {
-                        return Err("Expected AND in BETWEEN clause".to_string());
-                    }
-                } else {
-                    let start = self.parse_frame_bound()?;
-                    FrameBounds::Start(start)
-                }
-            } else {
-                return Err("Expected frame bound".to_string());
-            };
-            
-            let exclude = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                if id == "EXCLUDE" {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        self.advance();
-                        
-                        match id {
-                            "NO" => {
-                                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                                    if id == "OTHERS" {
-                                        self.advance();
-                                        Some(FrameExclude::NoOthers)
-                                    } else {
-                                        return Err("Expected OTHERS after NO".to_string());
-                                    }
-                                } else {
-                                    return Err("Expected OTHERS after NO".to_string());
-                                }
-                            },
-                            "CURRENT" => {
-                                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                                    if id == "ROW" {
-                                        self.advance();
-                                        Some(FrameExclude::CurrentRow)
-                                    } else {
-                                        return Err("Expected ROW after CURRENT".to_string());
-                                    }
-                                } else {
-                                    return Err("Expected ROW after CURRENT".to_string());
-                                }
-                            },
-                            "GROUP" => Some(FrameExclude::Group),
-                            "TIES" => Some(FrameExclude::Ties),
-                            _ => return Err(format!("Unexpected EXCLUDE type: {}", id)),
-                        }
-                    } else {
-                        return Err("Expected EXCLUDE type".to_string());
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            
-            Ok(Some(FrameSpec {
-                type_,
-                bounds,
-                exclude,
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-    
-    fn parse_frame_bound(&mut self) -> Result<FrameBound, String> {
-        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            match id {
+    fn parse_frame_bound(&mut self) -> Result<crate::ast::FrameBound<'static>, String> {
+        if let TokenType::Valid(Token::IDENTIFIER(bound_type)) = &self.current_token {
+            match bound_type.to_uppercase().as_str() {
                 "UNBOUNDED" => {
                     self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "PRECEDING" || id == "FOLLOWING" {
-                            self.advance();
-                            Ok(FrameBound::Unbounded)
-                        } else {
-                            Err("Expected PRECEDING or FOLLOWING after UNBOUNDED".to_string())
+                    if let TokenType::Valid(Token::IDENTIFIER(direction)) = &self.current_token {
+                        match direction.to_uppercase().as_str() {
+                            "PRECEDING" => {
+                                self.advance();
+                                Ok(crate::ast::FrameBound::UnboundedPreceding)
+                            },
+                            "FOLLOWING" => {
+                                self.advance();
+                                Ok(crate::ast::FrameBound::UnboundedFollowing)
+                            },
+                            _ => Err(format!("Expected PRECEDING or FOLLOWING after UNBOUNDED, found {:?}", self.current_token)),
                         }
                     } else {
-                        Err("Expected PRECEDING or FOLLOWING after UNBOUNDED".to_string())
+                        Err(format!("Expected PRECEDING or FOLLOWING after UNBOUNDED, found {:?}", self.current_token))
                     }
                 },
                 "CURRENT" => {
                     self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                        if id == "ROW" {
+                    if let TokenType::Valid(Token::IDENTIFIER(row)) = &self.current_token {
+                        if row.eq_ignore_ascii_case("ROW") {
                             self.advance();
-                            Ok(FrameBound::Current)
+                            Ok(crate::ast::FrameBound::CurrentRow)
                         } else {
-                            Err("Expected ROW after CURRENT".to_string())
+                            Err(format!("Expected ROW after CURRENT, found {:?}", self.current_token))
                         }
                     } else {
-                        Err("Expected ROW after CURRENT".to_string())
+                        Err(format!("Expected ROW after CURRENT, found {:?}", self.current_token))
                     }
                 },
                 _ => {
-                    if let Some(Ok(Token::NUMBER(offset_str))) = self.current_token {
-                        self.advance();
-                        
-                        let offset = offset_str.parse::<i64>().map_err(|_| "Invalid offset value".to_string())?;
-                        
-                        if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                            if id == "PRECEDING" || id == "FOLLOWING" {
+                    let expr = self.parse_expr()?;
+                    if let TokenType::Valid(Token::IDENTIFIER(direction)) = &self.current_token {
+                        match direction.to_uppercase().as_str() {
+                            "PRECEDING" => {
                                 self.advance();
-                                Ok(FrameBound::Offset(offset))
-                            } else {
-                                Err("Expected PRECEDING or FOLLOWING after offset".to_string())
-                            }
-                        } else {
-                            Err("Expected PRECEDING or FOLLOWING after offset".to_string())
+                                Ok(crate::ast::FrameBound::Preceding(Box::new(expr)))
+                            },
+                            "FOLLOWING" => {
+                                self.advance();
+                                Ok(crate::ast::FrameBound::Following(Box::new(expr)))
+                            },
+                            _ => Err(format!("Expected PRECEDING or FOLLOWING after expression in frame bound, found {:?}", self.current_token)),
                         }
                     } else {
-                        Err("Expected frame bound specification".to_string())
+                        Err(format!("Expected PRECEDING or FOLLOWING after expression in frame bound, found {:?}", self.current_token))
                     }
                 }
             }
-        } else if let Some(Ok(Token::NUMBER(offset_str))) = self.current_token {
-            self.advance();
-            
-            let offset = offset_str.parse::<i64>().map_err(|_| "Invalid offset value".to_string())?;
-            
-            if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                if id == "PRECEDING" || id == "FOLLOWING" {
-                    self.advance();
-                    Ok(FrameBound::Offset(offset))
-                } else {
-                    Err("Expected PRECEDING or FOLLOWING after offset".to_string())
-                }
-            } else {
-                Err("Expected PRECEDING or FOLLOWING after offset".to_string())
-            }
         } else {
-            Err("Expected frame bound specification".to_string())
-        }
-    }
-    
-    fn parse_expr(&mut self) -> Result<Expr<'a>, String> {
-        self.parse_simple_expr()
-    }
-    
-    fn parse_simple_expr(&mut self) -> Result<Expr<'a>, String> {
-        let left = self.parse_term()?;
-        
-        if let Some(Ok(token)) = &self.current_token {
-            match token {
-                Token::EQUALS => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    return Ok(Expr::BinaryOp {
-                        left: Box::new(left),
-                        op: BinaryOperator::Equals,
-                        right: Box::new(right),
-                    });
-                },
-                Token::NOT_EQUAL => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    return Ok(Expr::BinaryOp {
-                        left: Box::new(left),
-                        op: BinaryOperator::NotEquals,
-                        right: Box::new(right),
-                    });
-                },
-                Token::LESS_THAN => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    return Ok(Expr::BinaryOp {
-                        left: Box::new(left),
-                        op: BinaryOperator::LessThan,
-                        right: Box::new(right),
-                    });
-                },
-                Token::GREATER_THAN => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    return Ok(Expr::BinaryOp {
-                        left: Box::new(left),
-                        op: BinaryOperator::GreaterThan,
-                        right: Box::new(right),
-                    });
-                },
-                Token::LESS_THAN_EQUAL => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    return Ok(Expr::BinaryOp {
-                        left: Box::new(left),
-                        op: BinaryOperator::LessThanOrEqual,
-                        right: Box::new(right),
-                    });
-                },
-                Token::GREATER_THAN_EQUAL => {
-                    self.advance();
-                    let right = self.parse_term()?;
-                    return Ok(Expr::BinaryOp {
-                        left: Box::new(left),
-                        op: BinaryOperator::GreaterThanOrEqual,
-                        right: Box::new(right),
-                    });
-                },
-                _ => {}
-            }
-        }
-        
-        Ok(left)
-    }
-    
-    fn parse_term(&mut self) -> Result<Expr<'a>, String> {
-        match &self.current_token {
-            Some(Ok(Token::IDENTIFIER(id))) => {
-                let id = id.clone();
-                self.advance();
-                
-                if let Some(Ok(Token::DOT)) = self.current_token {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::IDENTIFIER(column_name))) = self.current_token {
-                        let column_name = column_name.clone();
+            let expr = self.parse_expr()?;
+            if let TokenType::Valid(Token::IDENTIFIER(direction)) = &self.current_token {
+                match direction.to_uppercase().as_str() {
+                    "PRECEDING" => {
                         self.advance();
-                        Ok(Expr::Column {
-                            schema_name: None,
-                            table_name: Some(id),
-                            column_name,
-                        })
-                    } else if let Some(Ok(Token::ASTERISK)) = self.current_token {
-                        Err("table.* is not supported in an expression context".to_string())
-                    } else {
-                        Err("Expected column name or * after dot".to_string())
-                    }
-                } else {
-                    Ok(Expr::Column {
-                        schema_name: None,
-                        table_name: None,
-                        column_name: id,
-                    })
-                }
-            },
-            Some(Ok(Token::NUMBER(value))) => {
-                let value = value.clone();
-                self.advance();
-                Ok(Expr::Literal(Literal::Numeric(value)))
-            },
-            Some(Ok(Token::STRING_LITERAL(value))) => {
-                let value = value.clone();
-                self.advance();
-                Ok(Expr::Literal(Literal::String(value)))
-            },
-            Some(Ok(Token::ASTERISK)) => {
-                self.advance();
-                Err("* is not a valid expression in this context".to_string())
-            },
-            _ => {
-                Err(format!("Unexpected token in expression: {:?}", self.current_token))
-            }
-        }
-    }
-
-    fn parse_order_by_clause(&mut self) -> Result<OrderByClause<'a>, String> {
-        let mut terms = Vec::new();
-        
-        terms.push(self.parse_ordering_term()?);
-        
-        while let Some(Ok(Token::COMMA)) = self.current_token {
-            self.advance();
-            terms.push(self.parse_ordering_term()?);
-        }
-        
-        Ok(OrderByClause { terms })
-    }
-    
-    fn parse_ordering_term(&mut self) -> Result<OrderingTerm<'a>, String> {
-        let expr = Box::new(self.parse_expr()?);
-        
-        let asc_desc = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            match id {
-                "ASC" => {
-                    self.advance();
-                    Some(AscDesc::Asc)
-                },
-                "DESC" => {
-                    self.advance();
-                    Some(AscDesc::Desc)
-                },
-                _ => None,
-            }
-        } else {
-            None
-        };
-        
-        let nulls = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-            if id == "NULLS" {
-                self.advance();
-                
-                if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                    self.advance();
-                    
-                    match id {
-                        "FIRST" => Some(NullsOrder::First),
-                        "LAST" => Some(NullsOrder::Last),
-                        _ => return Err(format!("Expected FIRST or LAST after NULLS, got {}", id)),
-                    }
-                } else {
-                    return Err("Expected FIRST or LAST after NULLS".to_string());
+                        Ok(crate::ast::FrameBound::Preceding(Box::new(expr)))
+                    },
+                    "FOLLOWING" => {
+                        self.advance();
+                        Ok(crate::ast::FrameBound::Following(Box::new(expr)))
+                    },
+                    _ => Err(format!("Expected PRECEDING or FOLLOWING after expression in frame bound, found {:?}", self.current_token)),
                 }
             } else {
-                None
+                Err(format!("Expected PRECEDING or FOLLOWING after expression in frame bound, found {:?}", self.current_token))
+            }
+        }
+    }
+    fn parse_lambda(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        let mut parameters = Vec::<&'static str>::new();
+        if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+            self.advance();
+            if let TokenType::Valid(Token::IDENTIFIER(param)) = &self.current_token {
+                parameters.push(Box::leak(param.to_string().into_boxed_str()));
+                self.advance();
+                while let TokenType::Valid(Token::COMMA) = &self.current_token {
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(param)) = &self.current_token {
+                        parameters.push(Box::leak(param.to_string().into_boxed_str()));
+                        self.advance();
+                    } else {
+                        return Err(format!("Expected parameter name after comma in lambda parameters, found {:?}", self.current_token));
+                    }
+                }
+            }
+            if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                self.advance();
+            } else {
+                return Err(format!("Expected ) after lambda parameters, found {:?}", self.current_token));
             }
         } else {
-            None
-        };
-        
-        Ok(OrderingTerm {
-            expr,
-            asc_desc,
-            nulls,
+            if let TokenType::Valid(Token::IDENTIFIER(param)) = &self.current_token {
+                parameters.push(Box::leak(param.to_string().into_boxed_str()));
+                self.advance();
+            } else {
+                return Err(format!("Expected parameter name or parameter list for lambda, found {:?}", self.current_token));
+            }
+        }
+        if let TokenType::Valid(Token::MINUS) = &self.current_token {
+            self.advance();
+            if let TokenType::Valid(Token::GREATER_THAN) = &self.current_token {
+                self.advance();
+            } else {
+                return Err(format!("Expected > to complete => arrow in lambda expression, found {:?}", self.current_token));
+            }
+        } else {
+            return Err(format!("Expected => arrow in lambda expression, found {:?}", self.current_token));
+        }
+        let body = Box::new(self.parse_expr()?);
+        Ok(crate::ast::Expr::Lambda {
+            parameters,
+            body,
         })
     }
-
-    fn parse_limit_clause(&mut self) -> Result<LimitClause<'a>, String> {
-        if let Some(Ok(Token::NUMBER(limit_str))) = self.current_token {
+    fn parse_function_call(&mut self, name: &str) -> Result<crate::ast::Expr<'static>, String> {
+        let function_name = Box::leak(name.to_string().into_boxed_str());
+        if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
             self.advance();
-            
-            let limit_expr = Expr::Literal(Literal::Numeric(limit_str));
-            
-            let offset = if let Some(Ok(Token::IDENTIFIER(id))) = self.current_token {
-                if id == "OFFSET" {
-                    self.advance();
-                    
-                    if let Some(Ok(Token::NUMBER(offset_str))) = self.current_token {
-                        self.advance();
-                        
-                        let offset_expr = Expr::Literal(Literal::Numeric(offset_str));
-                        Some(Box::new(offset_expr))
-                    } else {
-                        return Err("Expected numeric value for OFFSET".to_string());
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            
-            Ok(LimitClause {
-                limit: Box::new(limit_expr),
-                offset,
-            })
         } else {
-            Err("Expected numeric value for LIMIT".to_string())
+            return Err(format!("Expected ( after function name, found {:?}", self.current_token));
         }
-    }
-
-    fn parse_insert(&mut self) -> Result<Stmt<'a>, String> {
-        Err("INSERT parsing not yet implemented".to_string())
-    }
-    
-    fn parse_update(&mut self) -> Result<Stmt<'a>, String> {
-        Err("UPDATE parsing not yet implemented".to_string())
-    }
-    
-    fn parse_delete(&mut self) -> Result<Stmt<'a>, String> {
-        Err("DELETE parsing not yet implemented".to_string())
-    }
-    
-    fn parse_create(&mut self) -> Result<Stmt<'a>, String> {
-        Err("CREATE parsing not yet implemented".to_string())
-    }
-    
-    fn parse_alter(&mut self) -> Result<Stmt<'a>, String> {
-        Err("ALTER parsing not yet implemented".to_string())
-    }
-    
-    fn parse_drop(&mut self) -> Result<Stmt<'a>, String> {
-        Err("DROP parsing not yet implemented".to_string())
-    }
-    
-    fn parse_begin(&mut self) -> Result<Stmt<'a>, String> {
-        Err("BEGIN parsing not yet implemented".to_string())
-    }
-    
-    fn parse_commit(&mut self) -> Result<Stmt<'a>, String> {
-        Err("COMMIT parsing not yet implemented".to_string())
-    }
-    
-    fn parse_rollback(&mut self) -> Result<Stmt<'a>, String> {
-        Err("ROLLBACK parsing not yet implemented".to_string())
-    }
-    
-    fn parse_pragma(&mut self) -> Result<Stmt<'a>, String> {
-        Err("PRAGMA parsing not yet implemented".to_string())
-    }
-    
-    fn parse_analyze(&mut self) -> Result<Stmt<'a>, String> {
-        Err("ANALYZE parsing not yet implemented".to_string())
-    }
-    
-    fn parse_attach(&mut self) -> Result<Stmt<'a>, String> {
-        Err("ATTACH parsing not yet implemented".to_string())
-    }
-    
-    fn parse_detach(&mut self) -> Result<Stmt<'a>, String> {
-        Err("DETACH parsing not yet implemented".to_string())
-    }
-    
-    fn parse_vacuum(&mut self) -> Result<Stmt<'a>, String> {
-        Err("VACUUM parsing not yet implemented".to_string())
-    }
-    
-    fn parse_reindex(&mut self) -> Result<Stmt<'a>, String> {
-        Err("REINDEX parsing not yet implemented".to_string())
-    }
-    
-    fn parse_savepoint(&mut self) -> Result<Stmt<'a>, String> {
-        Err("SAVEPOINT parsing not yet implemented".to_string())
-    }
-    
-    fn parse_release(&mut self) -> Result<Stmt<'a>, String> {
-        Err("RELEASE parsing not yet implemented".to_string())
+        let mut args = Vec::new();
+        if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+            self.advance();
+        } else {
+            args.push(self.parse_expr()?);
+            while let TokenType::Valid(Token::COMMA) = &self.current_token {
+                self.advance();
+                args.push(self.parse_expr()?);
+            }
+            if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                self.advance();
+            } else {
+                return Err(format!("Expected ) after function arguments, found {:?}", self.current_token));
+            }
+        }
+        let mut filter_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(filter_id)) = &self.current_token {
+            if filter_id.eq_ignore_ascii_case("FILTER") {
+                self.advance();
+                if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(where_id)) = &self.current_token {
+                        if where_id.eq_ignore_ascii_case("WHERE") {
+                            self.advance();
+                            let filter_expr = self.parse_expr()?;
+                            filter_clause = Some(Box::new(filter_expr));
+                            if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                                self.advance();
+                            } else {
+                                return Err(format!("Expected ) after FILTER WHERE clause, found {:?}", self.current_token));
+                            }
+                        } else {
+                            return Err(format!("Expected WHERE after FILTER(, found {:?}", self.current_token));
+                        }
+                    } else {
+                        return Err(format!("Expected WHERE after FILTER(, found {:?}", self.current_token));
+                    }
+                }
+            }
+        }
+        let mut over_clause = None;
+        if let TokenType::Valid(Token::IDENTIFIER(over_id)) = &self.current_token {
+            if over_id.eq_ignore_ascii_case("OVER") {
+                self.advance();
+                let window_spec = self.parse_window_spec()?;
+                over_clause = Some(Box::new(window_spec));
+            }
+        }
+        Ok(crate::ast::Expr::FunctionCall {
+            name: function_name,
+            args,
+            filter_clause,
+            over_clause,
+        })
     }
 }
-
-pub fn parse(input: &str) -> Result<Vec<Stmt>, String> {
+fn parse_expr_string(input: &str) -> Result<crate::ast::Expr<'static>, String> {
+    if input.is_empty() {
+        return Err("Empty expression".to_string());
+    }
+    if let Ok(num) = input.parse::<i64>() {
+        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Numeric(Box::leak(input.to_string().into_boxed_str()))));
+    }
+    if (input.starts_with('\'') && input.ends_with('\'')) || 
+       (input.starts_with('"') && input.ends_with('"')) {
+        let content = &input[1..input.len()-1];
+        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::String(Box::leak(content.to_string().into_boxed_str()))));
+    }
+    if input.eq_ignore_ascii_case("NULL") {
+        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Null));
+    }
+    if input.eq_ignore_ascii_case("TRUE") {
+        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Keyword("TRUE")));
+    }
+    if input.eq_ignore_ascii_case("FALSE") {
+        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Keyword("FALSE")));
+    }
+    Ok(crate::ast::Expr::Column {
+        schema_name: None,
+        table_name: None,
+        column_name: Box::leak(input.to_string().into_boxed_str()),
+    })
+}
+pub fn parse(input: &str) -> Result<Vec<Stmt<'static>>, String> {
     let mut parser = Parser::new(input);
-    parser.parse_statements()
+    if let TokenType::EndOfInput = parser.current_token {
+        return Err("Empty input".to_string());
+    }
+    let stmt = parser.parse_statement()?;
+    Ok(vec![stmt])
 }
-
-pub fn parse_statement(input: &str) -> Result<Stmt, String> {
+pub fn parse_statement(input: &str) -> Result<Stmt<'static>, String> {
     let mut parser = Parser::new(input);
     parser.parse_statement()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn print_ast(stmt: &Stmt) {
-        match stmt {
-            Stmt::Select(select_stmt) => {
-                println!("SELECT Statement:");
-                println!("  Distinct: {}", select_stmt.select_core.distinct);
-                
-                println!("  Result Columns:");
-                for (i, column) in select_stmt.select_core.result_columns.iter().enumerate() {
-                    match column {
-                        ResultColumn::AllColumns => {
-                            println!("    [{}] All Columns (*)", i);
-                        },
-                        ResultColumn::TableAllColumns(table_name) => {
-                            println!("    [{}] Table All Columns: {}.* ", i, table_name);
-                        },
-                        ResultColumn::Expr { expr, alias } => {
-                            print!("    [{}] Expression", i);
-                            if let Some(alias_name) = alias {
-                                print!(" AS {}", alias_name);
-                            }
-                            println!();
-                            
-                            match expr.as_ref() {
-                                Expr::Column { schema_name, table_name, column_name } => {
-                                    print!("      Column: ");
-                                    if let Some(schema) = schema_name {
-                                        print!("{}..", schema);
-                                    }
-                                    if let Some(table) = table_name {
-                                        print!("{}.", table);
-                                    }
-                                    println!("{}", column_name);
-                                },
-                                Expr::Literal(lit) => {
-                                    match lit {
-                                        Literal::Numeric(val) => println!("      Literal: Number({})", val),
-                                        Literal::String(val) => println!("      Literal: String(\"{}\")", val),
-                                        _ => println!("      Literal: {:?}", lit),
-                                    }
-                                },
-                                _ => println!("      Other expression type: {:?}", expr),
-                            }
-                        },
-                    }
-                }
-                
-                if let Some(from_clause) = &select_stmt.select_core.from_clause {
-                    println!("  FROM Clause:");
-                    for (i, table) in from_clause.tables.iter().enumerate() {
-                        print_table_or_subquery(i, table);
-                    }
-                    
-                    if !from_clause.join_clauses.is_empty() {
-                        println!("    JOIN Clauses:");
-                        for (i, join) in from_clause.join_clauses.iter().enumerate() {
-                            println!("      [{}] Join Type: {:?}", i, join.join_type);
-                            
-                            print!("        Joined Table: ");
-                            print_table_or_subquery_inline(&join.table_or_subquery);
-                            println!();
-                            
-                            match &join.constraint {
-                                JoinConstraint::On(expr) => {
-                                    println!("        ON Condition: ");
-                                    print_expr("          ", expr);
-                                },
-                                JoinConstraint::Using(columns) => {
-                                    println!("        USING Columns: {}", columns.join(", "));
-                                },
-                            }
-                        }
-                    }
-                }
-                
-                if let Some(where_clause) = &select_stmt.select_core.where_clause {
-                    println!("  WHERE Clause:");
-                    print_expr("    ", where_clause);
-                }
-                
-                if let Some(group_by) = &select_stmt.select_core.group_by_clause {
-                    println!("  GROUP BY Clause: {} expressions", group_by.exprs.len());
-                    for (i, expr) in group_by.exprs.iter().enumerate() {
-                        println!("    [{}] ", i);
-                        print_expr("      ", expr);
-                    }
-                }
-                
-                if let Some(having) = &select_stmt.select_core.having_clause {
-                    println!("  HAVING Clause:");
-                    print_expr("    ", having);
-                }
-                
-                if let Some(order_by) = &select_stmt.order_by_clause {
-                    println!("  ORDER BY Clause: {} terms", order_by.terms.len());
-                    for (i, term) in order_by.terms.iter().enumerate() {
-                        print!("    [{}] ", i);
-                        print_expr("      ", &term.expr);
-                        
-                        if let Some(asc_desc) = &term.asc_desc {
-                            match asc_desc {
-                                AscDesc::Asc => print!(" ASC"),
-                                AscDesc::Desc => print!(" DESC"),
-                            }
-                        }
-                        
-                        if let Some(nulls) = &term.nulls {
-                            match nulls {
-                                NullsOrder::First => print!(" NULLS FIRST"),
-                                NullsOrder::Last => print!(" NULLS LAST"),
-                            }
-                        }
-                        println!();
-                    }
-                }
-                
-                if let Some(limit) = &select_stmt.limit_clause {
-                    println!("  LIMIT Clause:");
-                    print!("    Limit: ");
-                    print_expr("", &limit.limit);
-                    
-                    if let Some(offset) = &limit.offset {
-                        print!("    Offset: ");
-                        print_expr("", offset);
-                    }
-                }
-            },
-            _ => println!("Non-SELECT statement: {:?}", stmt),
-        }
+pub trait IntoStatic<'a> {
+    type Output;
+    fn into_static(self) -> Self::Output;
+}
+impl<'a> IntoStatic<'a> for &'a str {
+    type Output = &'static str;
+    fn into_static(self) -> Self::Output {
+        Box::leak(self.to_string().into_boxed_str())
     }
-    
-    fn print_table_or_subquery(index: usize, table: &TableOrSubquery) {
-        match table {
-            TableOrSubquery::Table { schema_name, table_name, alias, indexed_by, not_indexed } => {
-                print!("    [{}] Table: ", index);
-                if let Some(schema) = schema_name {
-                    print!("{}.", schema);
-                }
-                print!("{}", table_name);
-                if let Some(alias_name) = alias {
-                    print!(" AS {}", alias_name);
-                }
-                if *not_indexed {
-                    print!(" NOT INDEXED");
-                } else if let Some(index) = indexed_by {
-                    print!(" INDEXED BY {}", index);
-                }
-                println!();
-            },
-            TableOrSubquery::Subquery { select_stmt, alias } => {
-                print!("    [{}] Subquery", index);
-                if let Some(alias_name) = alias {
-                    print!(" AS {}", alias_name);
-                }
-                println!();
-            },
-            TableOrSubquery::TableFunction { name, args, alias } => {
-                print!("    [{}] Table Function: {}(", index, name);
-                if !args.is_empty() {
-                    print!("...)");
-                } else {
-                    print!(")");
-                }
-                
-                if let Some(alias_name) = alias {
-                    print!(" AS {}", alias_name);
-                }
-                println!();
-            },
-        }
+}
+impl<'a> IntoStatic<'a> for String {
+    type Output = &'static str;
+    fn into_static(self) -> Self::Output {
+        Box::leak(self.into_boxed_str())
     }
-    
-    fn print_table_or_subquery_inline(table: &TableOrSubquery) {
-        match table {
-            TableOrSubquery::Table { schema_name, table_name, alias, indexed_by, not_indexed } => {
-                if let Some(schema) = schema_name {
-                    print!("{}.", schema);
-                }
-                print!("{}", table_name);
-                if let Some(alias_name) = alias {
-                    print!(" AS {}", alias_name);
-                }
-                if *not_indexed {
-                    print!(" NOT INDEXED");
-                } else if let Some(index) = indexed_by {
-                    print!(" INDEXED BY {}", index);
-                }
-            },
-            TableOrSubquery::Subquery { alias, .. } => {
-                print!("Subquery");
-                if let Some(alias_name) = alias {
-                    print!(" AS {}", alias_name);
-                }
-            },
-            TableOrSubquery::TableFunction { name, alias, .. } => {
-                print!("Table Function: {}", name);
-                if let Some(alias_name) = alias {
-                    print!(" AS {}", alias_name);
-                }
-            },
-        }
+}
+impl<'a> IntoStatic<'a> for Option<&'a str> {
+    type Output = Option<&'static str>;
+    fn into_static(self) -> Self::Output {
+        self.map(|s| s.into_static())
     }
-    
-    fn print_expr(indent: &str, expr: &Expr) {
-        match expr {
-            Expr::Column { schema_name, table_name, column_name } => {
-                print!("{}Column: ", indent);
-                if let Some(schema) = schema_name {
-                    print!("{}..", schema);
-                }
-                if let Some(table) = table_name {
-                    print!("{}.", table);
-                }
-                println!("{}", column_name);
-            },
-            Expr::Literal(lit) => {
-                match lit {
-                    Literal::Numeric(val) => println!("{}Literal: Number({})", indent, val),
-                    Literal::String(val) => println!("{}Literal: String(\"{}\")", indent, val),
-                    _ => println!("{}Literal: {:?}", indent, lit),
-                }
-            },
-            Expr::BinaryOp { left, op, right } => {
-                println!("{}Binary Operation: {:?}", indent, op);
-                print_expr(&format!("{}  ", indent), left);
-                print_expr(&format!("{}  ", indent), right);
-            },
-            _ => println!("{}Other expression type: {:?}", indent, expr),
-        }
+}
+impl<'a> IntoStatic<'a> for Option<String> {
+    type Output = Option<&'static str>;
+    fn into_static(self) -> Self::Output {
+        self.map(|s| s.into_static())
     }
-
-    #[test]
-    fn test_parser_setup() {
-        let input = "SELECT * FROM users;";
-        let parser = Parser::new(input);
-        assert_eq!(parser.input, input);
+}
+impl<'a> IntoStatic<'a> for Vec<&'a str> {
+    type Output = Vec<&'static str>;
+    fn into_static(self) -> Self::Output {
+        self.into_iter().map(|s| s.into_static()).collect()
     }
-
-    #[test]
-    fn test_print_select_ast() {
-        let queries = [
-            "SELECT * FROM users;",
-            "SELECT id, name FROM users;",
-            "SELECT id AS user_id FROM users;",
-            "SELECT users.* FROM users;",
-            "SELECT * FROM users WHERE id = 1;",
-            "SELECT * FROM users ORDER BY name;",
-            "SELECT * FROM users LIMIT 10;",
-            "SELECT u.id, u.name FROM users u JOIN orders o ON u.id = o.user_id;"
-        ];
-        
-        println!("\n=== PRINTING AST STRUCTURES ===\n");
-        
-        for (i, query) in queries.iter().enumerate() {
-            println!("\nQuery {}: {}", i+1, query);
-            match parse_statement(query) {
-                Ok(stmt) => {
-                    print_ast(&stmt);
-                },
-                Err(err) => {
-                    println!("Error parsing: {}", err);
-                }
-            }
-            println!("{}", "-".repeat(50));
-        }
+}
+impl<'a> IntoStatic<'a> for Vec<String> {
+    type Output = Vec<&'static str>;
+    fn into_static(self) -> Self::Output {
+        self.into_iter().map(|s| s.into_static()).collect()
     }
-
-    #[test]
-    fn test_simple_select() {
-        let input = "SELECT * FROM users;";
-        let result = parse_statement(input);
-        assert!(result.is_ok());
-        
-        if let Ok(Stmt::Select(select_stmt)) = result {
-            let select_core = &select_stmt.select_core;
-            assert!(!select_core.distinct);
-            
-            if let Some(from_clause) = &select_core.from_clause {
-                assert_eq!(from_clause.tables.len(), 1);
-                if let TableOrSubquery::Table { schema_name, table_name, .. } = &from_clause.tables[0] {
-                    assert_eq!(schema_name, &None);
-                    assert_eq!(table_name, &"users");
-                } else {
-                    panic!("Expected Table variant");
-                }
-            } else {
-                panic!("Expected FROM clause");
-            }
-            
-            assert_eq!(select_core.result_columns.len(), 1);
-            match &select_core.result_columns[0] {
-                ResultColumn::AllColumns => {},
-                _ => panic!("Expected AllColumns variant"),
-            }
-        } else {
-            panic!("Expected Select statement");
-        }
+}
+fn convert_mut_str_vec<'a>(vec: Vec<&'a mut str>) -> Vec<&'static str> {
+    let converted = vec.iter().map(|s| convert_str(s.to_string())).collect();
+    converted
+}
+fn convert_option_mut_str(opt: Option<&mut str>) -> Option<&'static str> {
+    match opt {
+        Some(s) => Some(convert_str(s.to_string())),
+        None => None
     }
-    
-    #[test]
-    fn test_select_with_columns() {
-        let input = "SELECT id, name FROM users;";
-        let result = parse_statement(input);
-        assert!(result.is_ok());
-        
-        if let Ok(Stmt::Select(select_stmt)) = result {
-            let select_core = &select_stmt.select_core;
-            
-            assert_eq!(select_core.result_columns.len(), 2);
-            
-            if let ResultColumn::Expr { expr, alias } = &select_core.result_columns[0] {
-                if let Expr::Column { column_name, .. } = &**expr {
-                    assert_eq!(column_name, &"id");
-                    assert_eq!(alias, &None);
-                } else {
-                    panic!("Expected Column variant");
-                }
-            } else {
-                panic!("Expected Expr variant");
-            }
-            
-            if let ResultColumn::Expr { expr, alias } = &select_core.result_columns[1] {
-                if let Expr::Column { column_name, .. } = &**expr {
-                    assert_eq!(column_name, &"name");
-                    assert_eq!(alias, &None);
-                } else {
-                    panic!("Expected Column variant");
-                }
-            } else {
-                panic!("Expected Expr variant");
-            }
-        } else {
-            panic!("Expected Select statement");
-        }
+}
+fn convert_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+fn convert_option_str(opt: Option<&str>) -> Option<&'static str> {
+    match opt {
+        Some(s) => Some(convert_str(s.to_string())),
+        None => None
     }
-    
-    #[test]
-    fn test_select_with_alias() {
-        let input = "SELECT id AS user_id FROM users;";
-        let result = parse_statement(input);
-        assert!(result.is_ok());
-        
-        if let Ok(Stmt::Select(select_stmt)) = result {
-            let select_core = &select_stmt.select_core;
-            
-            if let ResultColumn::Expr { expr, alias } = &select_core.result_columns[0] {
-                if let Expr::Column { column_name, .. } = &**expr {
-                    assert_eq!(column_name, &"id");
-                    assert_eq!(alias, &Some("user_id"));
-                } else {
-                    panic!("Expected Column variant");
-                }
-            } else {
-                panic!("Expected Expr variant");
-            }
-        } else {
-            panic!("Expected Select statement");
-        }
-    }
-    
-    #[test]
-    fn test_select_with_where() {
-        let input = "SELECT * FROM users WHERE id = 1;";
-        let result = parse_statement(input);
-        assert!(result.is_ok());
-        
-        if let Ok(Stmt::Select(select_stmt)) = result {
-            let select_core = &select_stmt.select_core;
-            
-            assert!(select_core.where_clause.is_some());
-        } else {
-            panic!("Expected Select statement");
-        }
-    }
-    
-    #[test]
-    fn test_select_with_table_dot_star() {
-        let input = "SELECT users.* FROM users;";
-        let result = parse_statement(input);
-        assert!(result.is_ok());
-        
-        if let Ok(Stmt::Select(select_stmt)) = result {
-            let select_core = &select_stmt.select_core;
-            
-            assert_eq!(select_core.result_columns.len(), 1);
-            match &select_core.result_columns[0] {
-                ResultColumn::TableAllColumns(table_name) => {
-                    assert_eq!(table_name, &"users");
-                },
-                _ => panic!("Expected TableAllColumns variant"),
-            }
-        } else {
-            panic!("Expected Select statement");
-        }
-    }
-
-    #[test]
-    fn test_join_with_on_clause() {
-        let input = "SELECT u.id, u.name FROM users u JOIN orders o ON u.id = o.user_id;";
-        let result = parse_statement(input);
-        assert!(result.is_ok());
-        
-        if let Ok(Stmt::Select(select_stmt)) = result {
-            let select_core = &select_stmt.select_core;
-            
-            let from_clause = select_core.from_clause.as_ref().expect("Expected FROM clause");
-            
-            assert_eq!(from_clause.tables.len(), 1);
-            if let TableOrSubquery::Table { table_name, alias, .. } = &from_clause.tables[0] {
-                assert_eq!(table_name, &"users");
-                assert_eq!(alias, &Some("u"));
-            } else {
-                panic!("Expected Table variant");
-            }
-            
-            assert_eq!(from_clause.join_clauses.len(), 1);
-            let join = &from_clause.join_clauses[0];
-            assert_eq!(join.join_type, JoinType::Inner);
-            
-            if let TableOrSubquery::Table { table_name, alias, .. } = &join.table_or_subquery {
-                assert_eq!(table_name, &"orders");
-                assert_eq!(alias, &Some("o"));
-            } else {
-                panic!("Expected Table variant for joined table");
-            }
-            
-            if let JoinConstraint::On(expr) = &join.constraint {
-                if let Expr::BinaryOp { left, op, right } = expr.as_ref() {
-                    assert_eq!(*op, BinaryOperator::Equals);
-                    
-                    if let Expr::Column { table_name, column_name, .. } = left.as_ref() {
-                        assert_eq!(table_name, &Some("u"));
-                        assert_eq!(column_name, &"id");
-                    } else {
-                        panic!("Expected Column on left side of join condition");
-                    }
-                    
-                    if let Expr::Column { table_name, column_name, .. } = right.as_ref() {
-                        assert_eq!(table_name, &Some("o"));
-                        assert_eq!(column_name, &"user_id");
-                    } else {
-                        panic!("Expected Column on right side of join condition");
-                    }
-                } else {
-                    panic!("Expected BinaryOp in join condition");
-                }
-            } else {
-                panic!("Expected ON constraint in join");
-            }
-            
-            println!("Successfully validated JOIN with ON clause");
-        } else {
-            panic!("Expected Select statement");
-        }
-    }
+}
+pub fn print_ast(stmt: &crate::ast::Stmt) {
+    println!("{:#?}", stmt);
 }

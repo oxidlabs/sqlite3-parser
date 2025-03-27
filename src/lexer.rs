@@ -1,68 +1,44 @@
-use logos::{Logos, Span};
+use logos::Logos;
 use std::borrow::Cow;
-
 #[allow(non_camel_case_types)]
-#[derive(Logos, Debug, PartialEq)]
+#[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t\r\n\f]+")]
 pub enum Token<'a> {
-    // Types
-    //
-    // INTEGERS
     #[token("UNSIGNED BIG INT", ignore(case))]
     UINT,
-
-    // TEXT
     #[regex(r"(?i:CHARACTER)\(\d+\)", extract_size)]
     CHARACTER(&'a str),
-
     #[regex(r"(?i:VARCHAR)\(\d+\)", extract_size)]
     VARCHAR(&'a str),
-
     #[regex(r"(?i:VARYING\s+CHARACTER)\(\d+\)", extract_size)]
     VARYING_CHARACTER(&'a str),
-
     #[regex(r"(?i:NCHAR)\(\d+\)", extract_size)]
     NCHAR(&'a str),
-
     #[regex(r"(?i:NATIVE\s+CHARACTER)\(\d+\)", extract_size)]
     NATIVE_CHARACTER(&'a str),
-
     #[regex(r"(?i:NVARCHAR)\(\d+\)", extract_size)]
     NVARCHAR(&'a str),
-
-    // REAL
     #[token("DOUBLE PRECISION", ignore(case))]
     DOUBLE_PRECISION,
-
     #[regex(r"(?i:DECIMAL)\(\d+,\d+\)", extract_decimal)]
     Decimal((usize, usize)),
-
-    // Commands
     #[token("SELECT DISTINCT")]
     SELECT_DISTINCT,
-
     #[token("GROUP BY")]
     GROUP_BY,
-
     #[token("LEFT JOIN")]
     LEFT_JOIN,
-
     #[token("INNER JOIN")]
     INNER_JOIN,
-
     #[token("ORDER BY")]
     ORDER_BY,
-
-    // FUNCTIONS
     #[regex(
         r"(?i:[A-Za-z_][A-Za-z0-9_]*\((?:[^()]+|\((?:[^()]+|\([^()]*\))*\))*\))",
         extract_function
     )]
     FUNCTION((&'a str, Cow<'a, str>)),
-
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*", |lex| lex.slice())]
     IDENTIFIER(&'a str),
-
     #[regex(r#"["']([^"'\\]|\\.)*["']"#, |lex| {
         let slice = lex.slice();
         if slice.starts_with('"') {
@@ -72,190 +48,127 @@ pub enum Token<'a> {
         }
     })]
     STRING_LITERAL(&'a str),
-
-    // SEPERATORS
     #[token(",")]
     COMMA,
-
     #[token("=")]
     EQUALS,
-
     #[token("<")]
     LESS_THAN,
-
     #[token(">")]
     GREATER_THAN,
-
     #[token("<=")]
     LESS_THAN_EQUAL,
-
     #[token(">=")]
     GREATER_THAN_EQUAL,
-
     #[token("<>")]
     #[token("!=")]
     NOT_EQUAL,
-
     #[token("+")]
     PLUS,
-
     #[token("-")]
     MINUS,
-
     #[token("/")]
     SLASH,
-
     #[token("%")]
     PERCENT,
-
     #[token(";")]
     SEMICOLON,
-
     #[token("*")]
     ASTERISK,
-
     #[token(".")]
     DOT,
-
     #[token("(")]
     LEFT_PAREN,
-
     #[token(")")]
     RIGHT_PAREN,
-
     #[regex(r"[+-]?\d+(\.\d+)?")]
     NUMBER(&'a str),
 }
-
 #[allow(non_camel_case_types)]
-#[derive(Logos, Debug, PartialEq)]
+#[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Keywords {
     #[token("TEXT", ignore(case))]
     TEXT,
-
     #[token("CLOB", ignore(case))]
     CLOB,
-
     #[token("BLOB", ignore(case))]
     BLOB,
-
-    // REAL
     #[token("REAL", ignore(case))]
     REAL,
-
     #[token("DOUBLE", ignore(case))]
     DOUBLE,
-
     #[token("FLOAT", ignore(case))]
     FLOAT,
-
-    // NUMERIC
     #[token("NUMERIC", ignore(case))]
     NUMERIC,
-
     #[token("BOOLEAN", ignore(case))]
     BOOLEAN,
-
     #[token("DATE", ignore(case))]
     DATE,
-
     #[token("DATETIME", ignore(case))]
     DATE_TIME,
-
-    // Commands
     #[token("SELECT")]
     SELECT,
-
     #[token("CREATE")]
     CREATE,
-
     #[token("UPDATE")]
     UPDATE,
-
     #[token("DELETE")]
     DELETE,
-
     #[token("INSERT")]
     INSERT,
-
     #[token("SET")]
     SET,
-
     #[token("WITH")]
     WITH,
-
     #[token("JOIN")]
     JOIN,
-
     #[token("ON")]
     ON,
-
     #[token("NULL")]
     NULL,
-
     #[token("LIKE")]
     LIKE,
-
     #[token("LIMIT")]
     LIMIT,
-
     #[token("OR")]
     OR,
-
     #[token("ASC")]
     ASCENDING,
-
     #[token("DESC")]
     DESCENDING,
-
     #[token("FROM")]
     FROM,
-
     #[token("WHERE")]
     WHERE,
-
     #[token("AS")]
     AS,
-
-    // CASE COMMANDS
     #[token("CASE")]
     CASE,
-
     #[token("WHEN")]
     WHEN,
-
     #[token("THEN")]
     THEN,
-
     #[token("END")]
     END,
-
     #[token("INT", ignore(case))]
     #[token("INTEGER", ignore(case))]
     INT,
-
     #[token("TINYINT", ignore(case))]
     TINYINT,
-
     #[token("SMALLINT", ignore(case))]
     SMALLINT,
-
     #[token("MEDIUMINT", ignore(case))]
     MEDIUMINT,
-
     #[token("BIGINT", ignore(case))]
     BIGINT,
-
     #[token("INT2", ignore(case))]
     INT2,
-
     #[token("INT8", ignore(case))]
     INT8,
-
     #[token("VALUES")]
     VALUES,
 }
-
 fn collapse_whitespace(s: &str) -> Cow<str> {
     let mut iter = s.split_whitespace();
     if let Some(first) = iter.next() {
@@ -273,7 +186,6 @@ fn collapse_whitespace(s: &str) -> Cow<str> {
         Cow::Borrowed(s)
     }
 }
-
 fn extract_function<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> (&'a str, Cow<'a, str>) {
     let slice = lex.slice();
     let start = slice.find('(').unwrap();
@@ -283,14 +195,11 @@ fn extract_function<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> (&'a str, Cow<
     let inner_clean = collapse_whitespace(inner);
     (name, inner_clean)
 }
-
 fn extract_decimal<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> (usize, usize) {
     let slice = lex.slice();
-
     let start = slice.find('(').expect("Expected '(' in DECIMAL");
     let comma = slice.find(',').expect("Expected ',' in DECIMAL");
     let end = slice.find(')').expect("Expected ')' in DECIMAL");
-
     let precision_str = &slice[start + 1..comma];
     let scale_str = &slice[comma + 1..end];
     let precision = precision_str
@@ -299,24 +208,20 @@ fn extract_decimal<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> (usize, usize) 
     let scale = scale_str.parse::<usize>().expect("Failed to parse scale");
     (precision, scale)
 }
-
 fn extract_size<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> &'a str {
     let slice = lex.slice();
     let start = slice.find('(').expect("Expected '('");
     let end = slice.find(')').expect("Expected ')'");
     &slice[start + 1..end]
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use logos::Logos;
-
     #[test]
     fn test_select_query() {
         let query = "SELECT CustomerName, City FROM Customers WHERE Country = 'Mexico';";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("CustomerName"))));
         assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
@@ -330,12 +235,10 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_insert_query() {
         let query = "INSERT INTO Customers (CustomerName, City, Country) VALUES ('Cardinal', 'Stavanger', 'Norway');";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("INSERT"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("INTO"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("Customers"))));
@@ -357,12 +260,10 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_update_query() {
         let query = "UPDATE Customers SET ContactName = 'Alfred Schmidt', City = 'Hamburg' WHERE CustomerID = 1;";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("UPDATE"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("Customers"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SET"))));
@@ -383,12 +284,10 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_delete_query() {
         let query = "DELETE FROM Customers WHERE CustomerName = 'Alfreds Futterkiste';";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("DELETE"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("Customers"))));
@@ -402,12 +301,10 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_function_call() {
         let query = "SELECT ABS(-5) AS AbsoluteValue;";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
         assert_eq!(
             lexer.next(),
@@ -418,24 +315,20 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::SEMICOLON)));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_select_distinct() {
         let query = "SELECT DISTINCT name FROM users";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::SELECT_DISTINCT)));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("name"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("users"))));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_left_join() {
         let query = "SELECT * FROM orders LEFT JOIN customers ON orders.customer_id = customers.id";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
         assert_eq!(lexer.next(), Some(Ok(Token::ASTERISK)));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("FROM"))));
@@ -452,13 +345,11 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("id"))));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_group_by_order_by() {
         let query =
             "SELECT category, COUNT(*) FROM products GROUP BY category ORDER BY COUNT(*) DESC";
         let mut lexer = Token::lexer(query);
-
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("SELECT"))));
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("category"))));
         assert_eq!(lexer.next(), Some(Ok(Token::COMMA)));
@@ -478,7 +369,6 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::IDENTIFIER("DESC"))));
         assert_eq!(lexer.next(), None);
     }
-
     #[test]
     fn test_complex_sql_query() {
         let query = r"
@@ -573,9 +463,7 @@ ORDER BY
         ELSE 3
     END;
         ";
-
         let mut lexer = Token::lexer(query);
-
         let pattern = [
             Token::IDENTIFIER("WITH"),
             Token::IDENTIFIER("DepartmentSummary"),
@@ -992,7 +880,6 @@ ORDER BY
             Token::IDENTIFIER("END"),
             Token::SEMICOLON,
         ];
-
         for token_match in pattern {
             assert_eq!(lexer.next(), Some(Ok(token_match)));
         }
