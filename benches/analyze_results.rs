@@ -1,7 +1,7 @@
-use std::fs::{self, File};
-use std::io::{BufReader, BufRead};
-use std::path::Path;
 use std::collections::BTreeMap;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("SQLite Parser Benchmark Results Analysis");
     println!("========================================\n");
@@ -13,13 +13,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for group_dir in fs::read_dir(target_dir)? {
         let group_dir = group_dir?;
         let group_path = group_dir.path();
-        if group_path.is_dir() && group_path.file_name().unwrap().to_string_lossy().to_lowercase().contains("sqlite parsers") {
-            println!("Found benchmark group: {}", group_path.file_name().unwrap().to_string_lossy());
+        if group_path.is_dir()
+            && group_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains("sqlite parsers")
+        {
+            println!(
+                "Found benchmark group: {}",
+                group_path.file_name().unwrap().to_string_lossy()
+            );
             for bench_dir in fs::read_dir(group_path)? {
                 let bench_dir = bench_dir?;
                 let bench_path = bench_dir.path();
                 if bench_path.is_dir() {
-                    let name = bench_path.file_name().unwrap().to_string_lossy().to_string();
+                    let name = bench_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
                     println!("Found benchmark: {}", name);
                     let mut parts = name.split('/');
                     let parser = parts.next().unwrap_or("unknown").to_string();
@@ -41,15 +55,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                         }
-                        results.entry(query)
-                               .or_insert_with(BTreeMap::new)
-                               .insert(parser, mean_time);
+                        results
+                            .entry(query)
+                            .or_insert_with(BTreeMap::new)
+                            .insert(parser, mean_time);
                     } else {
                         println!("No estimates.json found at: {}", estimates_path.display());
                     }
                 }
             }
-            break;  
+            break;
         }
     }
     println!("\nBenchmark Results Table:");
@@ -63,11 +78,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             0.0
         };
-        println!("| {} | {:.2} | {:.2} | {:.2}% |", 
-                 query, 
-                 logos_time, 
-                 sqlparser_time,
-                 diff_pct);
+        println!(
+            "| {} | {:.2} | {:.2} | {:.2}% |",
+            query, logos_time, sqlparser_time, diff_pct
+        );
     }
     if results.is_empty() {
         println!("\nNo results found. Make sure your benchmarks have run successfully.");
@@ -75,4 +89,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\nNote: Negative difference (%) means Logos parser is faster");
     }
     Ok(())
-} 
+}

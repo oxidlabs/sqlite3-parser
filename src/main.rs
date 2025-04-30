@@ -1,5 +1,5 @@
-use std::env;
 use sqlite3_parser_logos::parser::{parse, print_ast};
+use std::env;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -16,9 +16,9 @@ fn main() {
                 print_ast(stmt);
                 println!();
             }
-        },
+        }
         Err(error) => {
             println!("Error parsing SQL: {}", error);
         }
     }
-} 
+}

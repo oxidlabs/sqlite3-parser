@@ -15,14 +15,14 @@ pub enum Stmt<'a> {
         columns: Vec<IndexedColumn<'a>>,
         where_clause: Option<Box<Expr<'a>>>,
     },
-    CreateTable{
+    CreateTable {
         temp_temporary: Option<TempTemporary>,
         if_not_exists: bool,
         schema_name: Option<&'a str>,
         table_name: &'a str,
         body: Box<CreateTableBody<'a>>,
     },
-    CreateTrigger{
+    CreateTrigger {
         temp_temporary: Option<TempTemporary>,
         if_not_exists: bool,
         schema_name: Option<&'a str>,
@@ -34,7 +34,7 @@ pub enum Stmt<'a> {
         when_expr: Option<Box<Expr<'a>>>,
         trigger_body: Vec<Stmt<'a>>,
     },
-    CreateView{
+    CreateView {
         temp_temporary: Option<TempTemporary>,
         if_not_exists: bool,
         schema_name: Option<&'a str>,
@@ -42,14 +42,14 @@ pub enum Stmt<'a> {
         column_names: Option<Vec<&'a str>>,
         select_stmt: Box<SelectStmt<'a>>,
     },
-    CreateVirtualTable{
+    CreateVirtualTable {
         if_not_exists: bool,
         schema_name: Option<&'a str>,
         table_name: &'a str,
         module_name: &'a str,
         module_args: Vec<&'a str>,
     },
-    Delete{
+    Delete {
         with_clause: Option<WithClause<'a>>,
         qualified_table_name: QualifiedTableName<'a>,
         where_clause: Option<Box<Expr<'a>>>,
@@ -58,27 +58,27 @@ pub enum Stmt<'a> {
         limit_clause: Option<LimitClause<'a>>,
     },
     Detach(Option<&'a str>),
-    DropIndex{
+    DropIndex {
         if_exists: bool,
         schema_name: Option<&'a str>,
         index_name: &'a str,
     },
-    DropTable{
+    DropTable {
         if_exists: bool,
         schema_name: Option<&'a str>,
         table_name: &'a str,
     },
-    DropTrigger{
+    DropTrigger {
         if_exists: bool,
         schema_name: Option<&'a str>,
         trigger_name: &'a str,
     },
-    DropView{
+    DropView {
         if_exists: bool,
         schema_name: Option<&'a str>,
         view_name: &'a str,
     },
-    Insert{
+    Insert {
         with_clause: Option<WithClause<'a>>,
         or_conflict: Option<ConflictClause>,
         schema_name: Option<&'a str>,
@@ -88,23 +88,23 @@ pub enum Stmt<'a> {
         data_source: InsertDataSource<'a>,
         returning_clause: Option<ReturningClause<'a>>,
     },
-    Pragma{
+    Pragma {
         schema_name: Option<&'a str>,
         pragma_name: &'a str,
         pragma_value: Option<PragmaValue<'a>>,
     },
-    Reindex{
+    Reindex {
         collation_name: Option<&'a str>,
         index_name: Option<&'a str>,
         schema_table_name: Option<SchemaTableName<'a>>,
     },
     Release(&'a str),
-    Rollback{
+    Rollback {
         savepoint_name: Option<&'a str>,
     },
     Savepoint(&'a str),
     Select(Box<SelectStmt<'a>>),
-    Update{
+    Update {
         with_clause: Option<WithClause<'a>>,
         or_conflict: Option<ConflictClause>,
         qualified_table_name: QualifiedTableName<'a>,
@@ -115,7 +115,7 @@ pub enum Stmt<'a> {
         order_by_clause: Option<OrderByClause<'a>>,
         limit_clause: Option<LimitClause<'a>>,
     },
-    Vacuum{
+    Vacuum {
         schema_name: Option<&'a str>,
         into_file: Option<Box<Expr<'a>>>,
     },
@@ -263,9 +263,9 @@ pub enum Literal<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnaryOperator {
     Not,
-    Negative,   
-    Positive,   
-    BitwiseNot, 
+    Negative,
+    Positive,
+    BitwiseNot,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinaryOperator {
