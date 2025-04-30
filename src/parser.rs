@@ -2435,6 +2435,11 @@ impl<'a> Parser<'a> {
                 "Expected AS or ( after table name, found {:?}",
                 self.current_token
             ))
+        } else {
+            Err(format!(
+                "Expected identifier after CREATE TABLE, found {:?}",
+                self.current_token
+            ))
         }
     }
     fn parse_column_defs_and_constraints(
