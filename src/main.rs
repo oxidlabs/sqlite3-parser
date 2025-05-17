@@ -1,6 +1,8 @@
 use sqlite3_parser_logos::parser::{parse, print_ast};
 use std::env;
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         println!("Usage: cargo run \"SELECT * FROM table\"");

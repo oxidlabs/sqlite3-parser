@@ -5,6 +5,7 @@ use crate::ast::{
 };
 use crate::lexer::Token;
 use logos::{Logos, Span};
+use tracing::debug;
 use std::mem;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,13 +24,18 @@ pub struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
+        debug!("Parser::new called with input: {:?}", input);
         let mut lexer = Token::lexer(input);
-        let current_token = match lexer.next() {
+        let lexer_next_result = lexer.next();
+        debug!("lexer.next() result: {:?}", lexer_next_result);
+        let current_token = match lexer_next_result {
             Some(Ok(token)) => TokenType::Valid(token),
             Some(Err(_)) => TokenType::Error,
             None => TokenType::EndOfInput,
         };
+        debug!("current_token: {:?}", current_token);
         let span = lexer.span();
+        debug!("span after lexer init: {:?}", span);
         Parser {
             input,
             current_token,
@@ -37,53 +43,54 @@ impl<'a> Parser<'a> {
             span,
         }
     }
+
     fn advance(&mut self) {
-        self.current_token = match self.lexer.next() {
+        debug!("advance() called, current_token: {:?}", self.current_token);
+        let lexer_next_result = self.lexer.next();
+        debug!("lexer.next() result: {:?}", lexer_next_result);
+        self.current_token = match lexer_next_result {
             Some(Ok(token)) => TokenType::Valid(token),
             Some(Err(_)) => TokenType::Error,
             None => TokenType::EndOfInput,
         };
         self.span = self.lexer.span();
+        debug!("new current_token: {:?}, new span: {:?}", self.current_token, self.span);
     }
-    fn match_token(&self, expected: &Token<'a>) -> bool {
-        match &self.current_token {
-            TokenType::Valid(token) => token == expected,
-            _ => false,
-        }
-    }
-    fn consume(&mut self, expected: &Token<'a>) -> bool {
-        if self.match_token(expected) {
-            self.advance();
-            true
-        } else {
-            false
-        }
-    }
+
     pub fn parse_statement(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_statement() called, current_token: {:?}", self.current_token);
         match &self.current_token {
             TokenType::Valid(Token::IDENTIFIER(id)) => {
                 if id.eq_ignore_ascii_case("SELECT") {
+                    debug!("parse_statement: found SELECT");
                     self.advance();
                     self.parse_select()
                 } else if id.eq_ignore_ascii_case("INSERT") {
+                    debug!("parse_statement: found INSERT");
                     self.advance();
                     self.parse_insert()
                 } else if id.eq_ignore_ascii_case("UPDATE") {
+                    debug!("parse_statement: found UPDATE");
                     self.advance();
                     self.parse_update()
                 } else if id.eq_ignore_ascii_case("DELETE") {
+                    debug!("parse_statement: found DELETE");
                     self.advance();
                     self.parse_delete()
                 } else if id.eq_ignore_ascii_case("CREATE") {
+                    debug!("parse_statement: found CREATE");
                     self.advance();
                     self.parse_create()
                 } else if id.eq_ignore_ascii_case("ALTER") {
+                    debug!("parse_statement: found ALTER");
                     self.advance();
                     self.parse_alter()
                 } else if id.eq_ignore_ascii_case("DROP") {
+                    debug!("parse_statement: found DROP");
                     self.advance();
                     self.parse_drop()
                 } else {
+                    debug!("parse_statement: found expression, parsing as SELECT expr");
                     self.parse_expr().map(|expr| {
                         Stmt::Select(Box::new(SelectStmt {
                             with_clause: None,
@@ -107,18 +114,29 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenType::Valid(Token::SELECT_DISTINCT) => {
+                debug!("parse_statement: found SELECT DISTINCT");
                 self.advance();
                 self.parse_select_distinct()
             }
-            TokenType::EndOfInput => Err("Unexpected end of input".to_string()),
-            TokenType::Error => Err("Lexical error".to_string()),
-            _ => Err(format!("Unexpected token: {:?}", self.current_token)),
+            TokenType::EndOfInput => {
+                debug!("parse_statement: Unexpected end of input");
+                Err("Unexpected end of input".to_string())
+            },
+            TokenType::Error => {
+                debug!("parse_statement: Lexical error");
+                Err("Lexical error".to_string())
+            },
+            _ => {
+                debug!("parse_statement: Unexpected token: {:?}", self.current_token);
+                Err(format!("Unexpected token: {:?}", self.current_token))
+            },
         }
     }
+
     fn parse_select(&mut self) -> Result<Stmt<'static>, String> {
-        // println!("[DEBUG] Entering parse_select, current_token: {:?}", self.current_token);
+        debug!("parse_select() called, current_token: {:?}", self.current_token);
         let result_columns = self.parse_result_columns()?;
-        // println!("[DEBUG] After parse_result_columns, current_token: {:?}", self.current_token);
+        debug!("parse_select: after parse_result_columns, current_token: {:?}", self.current_token);
         // Expect FROM
         match &self.current_token {
             TokenType::Valid(Token::IDENTIFIER(keyword))
@@ -127,15 +145,18 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
             TokenType::EndOfInput | TokenType::Valid(Token::SEMICOLON) => {
+                debug!("parse_select: Expected FROM clause after result columns, found {:?}", self.current_token);
                 return Err("Expected FROM clause after result columns".to_string());
             }
             TokenType::Valid(Token::IDENTIFIER(keyword)) => {
+                debug!("parse_select: Unexpected clause '{}' after result columns, expected FROM", keyword);
                 return Err(format!(
                     "Unexpected clause '{}' after result columns, expected FROM",
                     keyword
                 ));
             }
             _ => {
+                debug!("parse_select: Unexpected token after result columns: {:?}", self.current_token);
                 return Err(format!(
                     "Unexpected token after result columns: {:?}",
                     self.current_token
@@ -145,6 +166,7 @@ impl<'a> Parser<'a> {
         // println!("[DEBUG] After FROM, current_token: {:?}", self.current_token);
         // Parse full FROM clause, including JOINs and aliases
         let from_clause = Some(self.parse_from_clause()?);
+        debug!("parse_select: after parse_from_clause, current_token: {:?}", self.current_token);
         // Optional WHERE clause
         let mut where_clause = None;
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
@@ -187,15 +209,18 @@ impl<'a> Parser<'a> {
         let mut order_by_clause = None;
         let mut limit_clause = None;
         if let TokenType::Valid(Token::ORDER_BY) = &self.current_token {
+            debug!("parse_select: found ORDER BY");
             self.advance();
             order_by_clause = Some(crate::ast::OrderByClause {
                 terms: self.parse_order_by_clause()?,
             });
         } else if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if keyword.eq_ignore_ascii_case("ORDER") {
+                debug!("parse_select: found ORDER");
                 self.advance();
                 if let TokenType::Valid(Token::IDENTIFIER(by_kw)) = &self.current_token {
                     if by_kw.eq_ignore_ascii_case("BY") {
+                        debug!("parse_select: found ORDER BY");
                         self.advance();
                         order_by_clause = Some(crate::ast::OrderByClause {
                             terms: self.parse_order_by_clause()?,
@@ -206,6 +231,7 @@ impl<'a> Parser<'a> {
         }
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if keyword.eq_ignore_ascii_case("LIMIT") {
+                debug!("parse_select: found LIMIT");
                 self.advance();
                 limit_clause = Some(self.parse_limit_clause()?);
             }
@@ -229,6 +255,7 @@ impl<'a> Parser<'a> {
                 // This avoids false errors for valid queries like: FROM users u
             }
             _ => {
+                debug!("parse_select: Unexpected token after clause, current_token: {:?}", self.current_token);
                 return Err(format!(
                     "Unexpected token after {}: {:?}",
                     if where_clause.is_some() {
@@ -257,14 +284,17 @@ impl<'a> Parser<'a> {
             order_by_clause,
             limit_clause,
         };
-        // println!("[DEBUG] Finished parse_select with select_stmt: {:#?}", select_stmt);
+        debug!("parse_select: returning select_stmt: {:#?}", select_stmt);
         Ok(Stmt::Select(Box::new(select_stmt)))
     }
+
     fn parse_select_distinct(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_select_distinct() called, current_token: {:?}", self.current_token);
         let result_columns = self.parse_result_columns()?;
-        let from_clause = if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token
-        {
+        debug!("parse_select_distinct: after parse_result_columns, current_token: {:?}", self.current_token);
+        let from_clause = if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if keyword.eq_ignore_ascii_case("FROM") {
+                debug!("parse_select_distinct: found FROM");
                 self.advance();
                 Some(self.parse_from_clause()?)
             } else {
@@ -273,10 +303,10 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        // Ensure join_clauses and aliases are preserved in AST
         let mut where_clause = None;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("WHERE") {
+                debug!("parse_select_distinct: found WHERE");
                 self.advance();
                 where_clause = Some(Box::new(self.parse_expr()?));
             }
@@ -284,18 +314,22 @@ impl<'a> Parser<'a> {
         let mut group_by_clause = None;
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if keyword.eq_ignore_ascii_case("GROUP") {
+                debug!("parse_select_distinct: found GROUP");
                 self.advance();
                 if let TokenType::Valid(Token::IDENTIFIER(by_kw)) = &self.current_token {
                     if by_kw.eq_ignore_ascii_case("BY") {
+                        debug!("parse_select_distinct: found GROUP BY");
                         self.advance();
                         group_by_clause = Some(self.parse_group_by_clause()?);
                     } else {
+                        debug!("parse_select_distinct: Expected BY after GROUP, found {:?}", self.current_token);
                         return Err(format!(
                             "Expected BY after GROUP, found {:?}",
                             self.current_token
                         ));
                     }
                 } else {
+                    debug!("parse_select_distinct: Expected BY after GROUP, found {:?}", self.current_token);
                     return Err(format!(
                         "Expected BY after GROUP, found {:?}",
                         self.current_token
@@ -306,6 +340,7 @@ impl<'a> Parser<'a> {
         let mut having_clause = None;
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if keyword.eq_ignore_ascii_case("HAVING") {
+                debug!("parse_select_distinct: found HAVING");
                 self.advance();
                 having_clause = Some(Box::new(self.parse_expr()?));
             }
@@ -319,29 +354,39 @@ impl<'a> Parser<'a> {
             having_clause,
             window_clause: None,
         };
-        Ok(Stmt::Select(Box::new(SelectStmt {
+        let select_stmt = SelectStmt {
             with_clause: None,
             compound_operator: None,
             select_core,
             order_by_clause: None,
             limit_clause: None,
-        })))
+        };
+        debug!("parse_select_distinct: returning select_stmt: {:#?}", select_stmt);
+        Ok(Stmt::Select(Box::new(select_stmt)))
     }
+
     fn parse_result_columns(&mut self) -> Result<Vec<ResultColumn<'static>>, String> {
+        debug!("parse_result_columns() called, current_token: {:?}", self.current_token);
         let mut columns = Vec::new();
         if let TokenType::Valid(Token::ASTERISK) = &self.current_token {
+            debug!("parse_result_columns: found *");
             self.advance();
             columns.push(ResultColumn::AllColumns);
+            debug!("parse_result_columns: returning AllColumns");
             return Ok(columns);
         }
         columns.push(self.parse_result_column()?);
         while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            debug!("parse_result_columns: found COMMA");
             self.advance();
             columns.push(self.parse_result_column()?);
         }
+        debug!("parse_result_columns: returning columns: {:?}", columns);
         Ok(columns)
     }
+
     fn parse_result_column(&mut self) -> Result<ResultColumn<'static>, String> {
+        debug!("parse_result_column() called, current_token: {:?}", self.current_token);
         match &self.current_token {
             TokenType::Valid(Token::IDENTIFIER(id)) => {
                 // Disallow clause keywords as result columns
@@ -350,6 +395,7 @@ impl<'a> Parser<'a> {
                     .iter()
                     .any(|&kw| id.eq_ignore_ascii_case(kw))
                 {
+                    debug!("parse_result_column: Unexpected clause keyword '{}' in result columns", id);
                     return Err(format!(
                         "Unexpected clause keyword '{}' in result columns",
                         id
@@ -415,6 +461,7 @@ impl<'a> Parser<'a> {
                                     alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
                                     self.advance();
                                 } else {
+                                    debug!("parse_result_column: Expected alias name after AS, found {:?}", self.current_token);
                                     return Err(format!(
                                         "Expected alias name after AS, found {:?}",
                                         self.current_token
@@ -422,11 +469,14 @@ impl<'a> Parser<'a> {
                                 }
                             }
                         }
-                        return Ok(ResultColumn::Expr {
+                        let rc = ResultColumn::Expr {
                             expr: Box::new(expr),
                             alias: convert_option_str(alias),
-                        });
+                        };
+                        debug!("parse_result_column: returning table column expr: {:?}", rc);
+                        return Ok(rc);
                     }
+                    debug!("parse_result_column: Expected * or column name after ., found {:?}", self.current_token);
                     return Err(format!(
                         "Expected * or column name after ., found {:?}",
                         self.current_token
@@ -490,10 +540,12 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                Ok(ResultColumn::Expr {
+                let rc = ResultColumn::Expr {
                     expr: Box::new(final_expr),
                     alias: convert_option_str(alias),
-                })
+                };
+                debug!("parse_result_column: returning expr: {:?}", rc);
+                Ok(rc)
             }
             _ => {
                 let expr = self.parse_expr()?;
@@ -512,17 +564,22 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                Ok(ResultColumn::Expr {
+                let rc = ResultColumn::Expr {
                     expr: Box::new(expr),
                     alias: convert_option_str(alias),
-                })
+                };
+                debug!("parse_result_column: returning expr: {:?}", rc);
+                Ok(rc)
             }
         }
     }
+
     fn parse_from_clause(&mut self) -> Result<FromClause<'static>, String> {
+        debug!("parse_from_clause() called, current_token: {:?}", self.current_token);
         let first_table = self.parse_table_or_subquery()?;
         let mut tables = vec![first_table];
         while let TokenType::Valid(Token::COMMA) = self.current_token {
+            debug!("parse_from_clause: found COMMA, parsing next table");
             self.advance();
             let table = self.parse_table_or_subquery()?;
             tables.push(table);
@@ -531,6 +588,7 @@ impl<'a> Parser<'a> {
         loop {
             if let TokenType::Valid(Token::IDENTIFIER(join_keyword)) = &self.current_token {
                 if join_keyword.eq_ignore_ascii_case("JOIN") {
+                    debug!("parse_from_clause: found JOIN");
                     self.advance();
                     let table = self.parse_table_or_subquery()?;
                     let constraint = self.parse_join_constraint()?;
@@ -540,9 +598,11 @@ impl<'a> Parser<'a> {
                         constraint,
                     });
                 } else if join_keyword.eq_ignore_ascii_case("LEFT") {
+                    debug!("parse_from_clause: found LEFT");
                     self.advance();
                     if let TokenType::Valid(Token::IDENTIFIER(next)) = &self.current_token {
                         if next.eq_ignore_ascii_case("JOIN") {
+                            debug!("parse_from_clause: found LEFT JOIN");
                             self.advance();
                             let table = self.parse_table_or_subquery()?;
                             let constraint = self.parse_join_constraint()?;
@@ -552,12 +612,14 @@ impl<'a> Parser<'a> {
                                 constraint,
                             });
                         } else {
+                            debug!("parse_from_clause: Expected JOIN after LEFT, got {:?}", self.current_token);
                             return Err(format!(
                                 "Expected JOIN after LEFT, got {:?}",
                                 self.current_token
                             ));
                         }
                     } else if let TokenType::Valid(Token::LEFT_JOIN) = &self.current_token {
+                        debug!("parse_from_clause: found LEFT_JOIN token");
                         self.advance();
                         let table = self.parse_table_or_subquery()?;
                         let constraint = self.parse_join_constraint()?;
@@ -567,6 +629,7 @@ impl<'a> Parser<'a> {
                             constraint,
                         });
                     } else {
+                        debug!("parse_from_clause: Expected JOIN after LEFT, got {:?}", self.current_token);
                         return Err(format!(
                             "Expected JOIN after LEFT, got {:?}",
                             self.current_token
@@ -606,9 +669,11 @@ impl<'a> Parser<'a> {
                         ));
                     }
                 } else if join_keyword.eq_ignore_ascii_case("CROSS") {
+                    debug!("parse_from_clause: found CROSS");
                     self.advance();
                     if let TokenType::Valid(Token::IDENTIFIER(next)) = &self.current_token {
                         if next.eq_ignore_ascii_case("JOIN") {
+                            debug!("parse_from_clause: found CROSS JOIN");
                             self.advance();
                             let table = self.parse_table_or_subquery()?;
                             join_clauses.push(JoinClause {
@@ -619,6 +684,7 @@ impl<'a> Parser<'a> {
                                 ))),
                             });
                         } else {
+                            debug!("parse_from_clause: Expected JOIN after CROSS, got {:?}", self.current_token);
                             return Err(format!(
                                 "Expected JOIN after CROSS, got {:?}",
                                 self.current_token
@@ -629,6 +695,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
             } else if let TokenType::Valid(Token::LEFT_JOIN) = &self.current_token {
+                debug!("parse_from_clause: found LEFT_JOIN token");
                 self.advance();
                 let table = self.parse_table_or_subquery()?;
                 let constraint = self.parse_join_constraint()?;
@@ -638,6 +705,7 @@ impl<'a> Parser<'a> {
                     constraint,
                 });
             } else if let TokenType::Valid(Token::INNER_JOIN) = &self.current_token {
+                debug!("parse_from_clause: found INNER_JOIN token");
                 self.advance();
                 let table = self.parse_table_or_subquery()?;
                 let constraint = self.parse_join_constraint()?;
@@ -650,25 +718,30 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        Ok(FromClause {
+        let fc = FromClause {
             tables,
             join_clauses,
-        })
+        };
+        debug!("parse_from_clause: returning FromClause: {:#?}", fc);
+        Ok(fc)
     }
+
     fn parse_table_or_subquery(&mut self) -> Result<TableOrSubquery<'static>, String> {
-        // println!("[DEBUG] Entering parse_table_or_subquery, current_token: {:?}", self.current_token);
+        debug!("parse_table_or_subquery() called, current_token: {:?}", self.current_token);
         match &self.current_token {
             TokenType::Valid(Token::IDENTIFIER(id)) => {
                 let id_str = Box::leak(id.to_string().into_boxed_str());
                 self.advance();
                 let (schema_name, table_name) =
                     if let TokenType::Valid(Token::DOT) = &self.current_token {
+                        debug!("parse_table_or_subquery: found schema qualifier");
                         self.advance();
                         if let TokenType::Valid(Token::IDENTIFIER(table_id)) = &self.current_token {
                             let table_id_copy = table_id.to_string();
                             self.advance();
                             (Some(id_str), Box::leak(table_id_copy.into_boxed_str()))
                         } else {
+                            debug!("parse_table_or_subquery: Expected table name after schema qualifier, found {:?}", self.current_token);
                             return Err(format!(
                                 "Expected table name after schema qualifier, found {:?}",
                                 self.current_token
@@ -678,9 +751,7 @@ impl<'a> Parser<'a> {
                         (None, id_str)
                     };
                 let mut alias: Option<&'static str> = None;
-                // Fast path: only check for alias if next token is IDENTIFIER and not a clause keyword
                 if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
-                    // Clause keywords that cannot be table aliases
                     const CLAUSE_KEYWORDS: [&str; 5] =
                         ["WHERE", "GROUP", "HAVING", "ORDER", "LIMIT"];
                     if !CLAUSE_KEYWORDS
@@ -688,6 +759,7 @@ impl<'a> Parser<'a> {
                         .any(|&kw| as_id.eq_ignore_ascii_case(kw))
                     {
                         if as_id.eq_ignore_ascii_case("AS") {
+                            debug!("parse_table_or_subquery: found AS for alias");
                             self.advance();
                             if let TokenType::Valid(Token::IDENTIFIER(alias_id)) =
                                 &self.current_token
@@ -695,13 +767,14 @@ impl<'a> Parser<'a> {
                                 alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
                                 self.advance();
                             } else {
+                                debug!("parse_table_or_subquery: Expected alias after AS, found {:?}", self.current_token);
                                 return Err(format!(
                                     "Expected alias after AS, found {:?}",
                                     self.current_token
                                 ));
                             }
                         } else {
-                            // Alias without AS keyword
+                            debug!("parse_table_or_subquery: found alias without AS");
                             alias = Some(Box::leak(as_id.to_string().into_boxed_str()));
                             self.advance();
                         }
@@ -711,10 +784,12 @@ impl<'a> Parser<'a> {
                 let mut not_indexed = false;
                 if let TokenType::Valid(Token::IDENTIFIER(indexed_keyword)) = &self.current_token {
                     if indexed_keyword.eq_ignore_ascii_case("INDEXED") {
+                        debug!("parse_table_or_subquery: found INDEXED");
                         self.advance();
                         if let TokenType::Valid(Token::IDENTIFIER(by_keyword)) = &self.current_token
                         {
                             if by_keyword.eq_ignore_ascii_case("BY") {
+                                debug!("parse_table_or_subquery: found INDEXED BY");
                                 self.advance();
                                 if let TokenType::Valid(Token::IDENTIFIER(index_name)) =
                                     &self.current_token
@@ -723,24 +798,28 @@ impl<'a> Parser<'a> {
                                         Some(Box::leak(index_name.to_string().into_boxed_str()));
                                     self.advance();
                                 } else {
+                                    debug!("parse_table_or_subquery: Expected index name after INDEXED BY, found {:?}", self.current_token);
                                     return Err(format!(
                                         "Expected index name after INDEXED BY, found {:?}",
                                         self.current_token
                                     ));
                                 }
                             } else {
+                                debug!("parse_table_or_subquery: Expected BY after INDEXED, found {:?}", self.current_token);
                                 return Err(format!(
                                     "Expected BY after INDEXED, found {:?}",
                                     self.current_token
                                 ));
                             }
                         } else {
+                            debug!("parse_table_or_subquery: Expected BY after INDEXED, found {:?}", self.current_token);
                             return Err(format!(
                                 "Expected BY after INDEXED, found {:?}",
                                 self.current_token
                             ));
                         }
                     } else if indexed_keyword.eq_ignore_ascii_case("NOT") {
+                        debug!("parse_table_or_subquery: found NOT INDEXED");
                         self.advance();
                         if let TokenType::Valid(Token::IDENTIFIER(indexed_keyword)) =
                             &self.current_token
@@ -749,12 +828,14 @@ impl<'a> Parser<'a> {
                                 not_indexed = true;
                                 self.advance();
                             } else {
+                                debug!("parse_table_or_subquery: Expected INDEXED after NOT, found {:?}", self.current_token);
                                 return Err(format!(
                                     "Expected INDEXED after NOT, found {:?}",
                                     self.current_token
                                 ));
                             }
                         } else {
+                            debug!("parse_table_or_subquery: Expected INDEXED after NOT, found {:?}", self.current_token);
                             return Err(format!(
                                 "Expected INDEXED after NOT, found {:?}",
                                 self.current_token
@@ -762,13 +843,15 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                Ok(TableOrSubquery::Table {
+                let t = TableOrSubquery::Table {
                     schema_name: convert_option_str(schema_name.as_deref()),
                     table_name,
                     alias: convert_option_str(alias),
                     indexed_by: convert_option_str(indexed_by),
                     not_indexed,
-                })
+                };
+                debug!("parse_table_or_subquery: returning Table: {:#?}", t);
+                Ok(t)
             }
             TokenType::Valid(Token::LEFT_PAREN) => {
                 self.advance();
@@ -805,10 +888,12 @@ impl<'a> Parser<'a> {
                                     self.advance();
                                 }
                             }
-                            Ok(TableOrSubquery::Subquery {
+                            let sq = TableOrSubquery::Subquery {
                                 select_stmt: Box::new(select_stmt),
                                 alias: convert_option_str(alias),
-                            })
+                            };
+                            debug!("parse_table_or_subquery: returning Subquery: {:#?}", sq);
+                            Ok(sq)
                         } else {
                             return Err(format!(
                                 "Expected ) after subquery, found {:?}",
@@ -819,6 +904,7 @@ impl<'a> Parser<'a> {
                         let table_or_subquery = self.parse_table_or_subquery()?;
                         if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
                             self.advance();
+                            debug!("parse_table_or_subquery: returning nested table_or_subquery");
                             Ok(table_or_subquery)
                         } else {
                             return Err(format!(
@@ -828,6 +914,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else {
+                    debug!("parse_table_or_subquery: Expected table name or SELECT after (, found {:?}", self.current_token);
                     return Err(format!(
                         "Expected table name or SELECT after (, found {:?}",
                         self.current_token
@@ -835,6 +922,7 @@ impl<'a> Parser<'a> {
                 }
             }
             _ => {
+                debug!("parse_table_or_subquery: Expected table name or subquery, found {:?}", self.current_token);
                 return Err(format!(
                     "Expected table name or subquery, found {:?}",
                     self.current_token
@@ -842,23 +930,31 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
     fn parse_order_by_clause(&mut self) -> Result<Vec<crate::ast::OrderingTerm<'static>>, String> {
+        debug!("parse_order_by_clause() called, current_token: {:?}", self.current_token);
         let mut terms = Vec::new();
         terms.push(self.parse_ordering_term()?);
         while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            debug!("parse_order_by_clause: found COMMA");
             self.advance();
             terms.push(self.parse_ordering_term()?);
         }
+        debug!("parse_order_by_clause: returning terms: {:?}", terms);
         Ok(terms)
     }
+
     fn parse_ordering_term(&mut self) -> Result<crate::ast::OrderingTerm<'static>, String> {
+        debug!("parse_ordering_term() called, current_token: {:?}", self.current_token);
         let expr = self.parse_expr()?;
         let mut asc_desc = None;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("ASC") {
+                debug!("parse_ordering_term: found ASC");
                 asc_desc = Some(crate::ast::AscDesc::Asc);
                 self.advance();
             } else if id.eq_ignore_ascii_case("DESC") {
+                debug!("parse_ordering_term: found DESC");
                 asc_desc = Some(crate::ast::AscDesc::Desc);
                 self.advance();
             }
@@ -866,21 +962,26 @@ impl<'a> Parser<'a> {
         let mut nulls = None;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("NULLS") {
+                debug!("parse_ordering_term: found NULLS");
                 self.advance();
                 if let TokenType::Valid(Token::IDENTIFIER(pos)) = &self.current_token {
                     if pos.eq_ignore_ascii_case("FIRST") {
+                        debug!("parse_ordering_term: found NULLS FIRST");
                         nulls = Some(crate::ast::NullsOrder::First);
                         self.advance();
                     } else if pos.eq_ignore_ascii_case("LAST") {
+                        debug!("parse_ordering_term: found NULLS LAST");
                         nulls = Some(crate::ast::NullsOrder::Last);
                         self.advance();
                     } else {
+                        debug!("parse_ordering_term: Expected FIRST or LAST after NULLS, found {:?}", self.current_token);
                         return Err(format!(
                             "Expected FIRST or LAST after NULLS, found {:?}",
                             self.current_token
                         ));
                     }
                 } else {
+                    debug!("parse_ordering_term: Expected FIRST or LAST after NULLS, found {:?}", self.current_token);
                     return Err(format!(
                         "Expected FIRST or LAST after NULLS, found {:?}",
                         self.current_token
@@ -888,61 +989,83 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(crate::ast::OrderingTerm {
+        let ot = crate::ast::OrderingTerm {
             expr: Box::new(expr),
             asc_desc,
             nulls,
-        })
+        };
+        debug!("parse_ordering_term: returning OrderingTerm: {:#?}", ot);
+        Ok(ot)
     }
+
     fn parse_limit_clause(&mut self) -> Result<LimitClause<'static>, String> {
+        debug!("parse_limit_clause() called, current_token: {:?}", self.current_token);
         let expr = self.parse_expr()?;
         let mut offset = None;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("OFFSET") {
+                debug!("parse_limit_clause: found OFFSET");
                 self.advance();
                 let offset_expr = self.parse_expr()?;
                 offset = Some(Box::new(offset_expr));
             }
         } else if let TokenType::Valid(Token::COMMA) = &self.current_token {
+            debug!("parse_limit_clause: found COMMA");
             self.advance();
             let limit_expr = expr;
             offset = Some(Box::new(limit_expr));
-            return Ok(LimitClause {
+            let lc = LimitClause {
                 limit: Box::new(self.parse_expr()?),
                 offset,
-            });
+            };
+            debug!("parse_limit_clause: returning LimitClause (with comma): {:#?}", lc);
+            return Ok(lc);
         }
-        Ok(LimitClause {
+        let lc = LimitClause {
             limit: Box::new(expr),
             offset,
-        })
+        };
+        debug!("parse_limit_clause: returning LimitClause: {:#?}", lc);
+        Ok(lc)
     }
+    
     fn parse_group_by_clause(&mut self) -> Result<crate::ast::GroupByClause<'static>, String> {
+        debug!("parse_group_by_clause: entry, current_token: {:?}", self.current_token);
         let mut exprs = Vec::new();
         let expr = self.parse_expr()?;
+        debug!("parse_group_by_clause: first expr: {:#?}", expr);
         exprs.push(expr);
         while let TokenType::Valid(Token::COMMA) = &self.current_token {
+            debug!("parse_group_by_clause: found COMMA, advancing");
             self.advance();
             let expr = self.parse_expr()?;
+            debug!("parse_group_by_clause: next expr: {:#?}", expr);
             exprs.push(expr);
         }
+        debug!("parse_group_by_clause: returning GroupByClause: {:#?}", exprs);
         Ok(crate::ast::GroupByClause { exprs })
     }
+
     fn parse_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_expr: entry, current_token: {:?}", self.current_token);
         let result = self.parse_or_expr();
-        // println!("[DEBUG] After parse_expr, current_token: {:?}", self.current_token);
+        debug!("parse_expr: result: {:#?}, current_token: {:?}", result, self.current_token);
         result
     }
+
     fn parse_or_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_or_expr: entry, current_token: {:?}", self.current_token);
         let mut expr = self.parse_and_expr()?;
-        // println!("[DEBUG] After parse_and_expr in parse_or_expr, current_token: {:?}", self.current_token);
+        debug!("parse_or_expr: after parse_and_expr, expr: {:#?}, current_token: {:?}", expr, self.current_token);
         loop {
             if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
                 if !id.eq_ignore_ascii_case("OR") {
                     break;
                 }
+                debug!("parse_or_expr: found OR, advancing");
                 self.advance();
                 let right = self.parse_and_expr()?;
+                debug!("parse_or_expr: right expr: {:#?}", right);
                 expr = crate::ast::Expr::BinaryOp {
                     left: Box::new(expr),
                     op: crate::ast::BinaryOperator::Or,
@@ -952,31 +1075,36 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        // println!("[DEBUG] End of parse_or_expr, current_token: {:?}", self.current_token);
+        debug!("parse_or_expr: returning expr: {:#?}", expr);
         Ok(expr)
     }
+
     fn parse_and_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_and_expr: entry, current_token: {:?}", self.current_token);
         let mut expr = self.parse_comparison_expr()?;
-        // println!("[DEBUG] After parse_comparison_expr in parse_and_expr, current_token: {:?}", self.current_token);
+        debug!("parse_and_expr: after parse_comparison_expr, expr: {:#?}, current_token: {:?}", expr, self.current_token);
         while let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if !id.eq_ignore_ascii_case("AND") {
                 break;
             }
+            debug!("parse_and_expr: found AND, advancing");
             self.advance();
             let right = self.parse_comparison_expr()?;
+            debug!("parse_and_expr: right expr: {:#?}", right);
             expr = crate::ast::Expr::BinaryOp {
                 left: Box::new(expr),
                 op: crate::ast::BinaryOperator::And,
                 right: Box::new(right),
             };
         }
-        // println!("[DEBUG] End of parse_and_expr, current_token: {:?}", self.current_token);
+        debug!("parse_and_expr: returning expr: {:#?}", expr);
         Ok(expr)
     }
+
     fn parse_comparison_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
-        // println!("[DEBUG] Entering parse_comparison_expr, current_token: {:?}", self.current_token);
+        debug!("parse_comparison_expr: entry, current_token: {:?}", self.current_token);
         let mut left = self.parse_additive_expr()?;
-        // println!("[DEBUG] After parse_additive_expr in parse_comparison_expr, left: {:?}, current_token: {:?}", left, self.current_token);
+        debug!("parse_comparison_expr: after parse_additive_expr, left: {:#?}, current_token: {:?}", left, self.current_token);
         loop {
             // println!("[DEBUG] Top of comparison loop, current_token: {:?}", self.current_token);
 
@@ -1148,11 +1276,14 @@ impl<'a> Parser<'a> {
                 _ => break,
             }
         }
+        debug!("parse_comparison_expr: returning expr: {:#?}", left);
         Ok(left)
     }
 
     fn parse_additive_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_additive_expr: entry, current_token: {:?}", self.current_token);
         let mut expr = self.parse_multiplicative_expr()?;
+        debug!("parse_additive_expr: after parse_multiplicative_expr, expr: {:#?}, current_token: {:?}", expr, self.current_token);
         loop {
             match &self.current_token {
                 TokenType::Valid(Token::PLUS) => {
@@ -1178,8 +1309,11 @@ impl<'a> Parser<'a> {
         }
         Ok(expr)
     }
+
     fn parse_multiplicative_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_multiplicative_expr: entry, current_token: {:?}", self.current_token);
         let mut expr = self.parse_unary_expr()?;
+        debug!("parse_multiplicative_expr: after parse_unary_expr, expr: {:#?}, current_token: {:?}", expr, self.current_token);
         loop {
             match &self.current_token {
                 TokenType::Valid(Token::ASTERISK) => {
@@ -1214,7 +1348,9 @@ impl<'a> Parser<'a> {
         }
         Ok(expr)
     }
+
     fn parse_unary_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_unary_expr: entry, current_token: {:?}", self.current_token);
         match &self.current_token {
             TokenType::Valid(Token::MINUS) => {
                 self.advance();
@@ -1236,10 +1372,15 @@ impl<'a> Parser<'a> {
                     expr: Box::new(expr),
                 })
             }
-            _ => self.parse_primary_expr(),
+            _ => {
+                debug!("parse_unary_expr: delegating to parse_primary_expr");
+                self.parse_primary_expr()
+            }
         }
     }
+
     fn parse_primary_expr(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_primary_expr: entry, current_token: {:?}", self.current_token);
         match &self.current_token {
             TokenType::Valid(Token::NUMBER(num)) => {
                 let num_str = num.to_string();
@@ -1391,16 +1532,19 @@ impl<'a> Parser<'a> {
                     over_clause: None,
                 })
             }
-            _ => Err(format!(
-                "Unexpected token in expression: {:?}",
-                self.current_token
-            )),
+            _ => {
+                debug!("parse_primary_expr: unexpected token: {:?}", self.current_token);
+                Err(format!(
+                    "Unexpected token in expression: {:?}",
+                    self.current_token
+                ))
+            },
         }
+        // Optionally, log successful parse result here if desired
     }
-    fn position(&self) -> usize {
-        self.span.start
-    }
+
     fn parse_join_constraint(&mut self) -> Result<JoinConstraint<'static>, String> {
+        debug!("parse_join_constraint: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(on_keyword)) = &self.current_token {
             if on_keyword.eq_ignore_ascii_case("ON") {
                 self.advance();
@@ -1444,12 +1588,15 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        debug!("parse_join_constraint: error, expected ON or USING after join, found {:?}", self.current_token);
         Err(format!(
             "Expected ON or USING after join, found {:?}",
             self.current_token
         ))
     }
+    
     fn parse_update(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_update: entry, current_token: {:?}", self.current_token);
         let table_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             let name = id.to_string().into_static();
             self.advance();
@@ -1494,7 +1641,7 @@ impl<'a> Parser<'a> {
             indexed_by: None,
             not_indexed: false,
         };
-        Ok(Stmt::Update {
+        let stmt = Stmt::Update {
             with_clause: None,
             or_conflict: None,
             qualified_table_name,
@@ -1504,9 +1651,13 @@ impl<'a> Parser<'a> {
             returning_clause: None,
             order_by_clause: None,
             limit_clause: None,
-        })
+        };
+        debug!("parse_update: returning stmt: {:#?}", stmt);
+        Ok(stmt)
     }
+
     fn parse_set_clause(&mut self) -> Result<crate::ast::SetClause<'static>, String> {
+        debug!("parse_set_clause: entry, current_token: {:?}", self.current_token);
         let column_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             let name = id.to_string().into_static();
             self.advance();
@@ -1526,12 +1677,16 @@ impl<'a> Parser<'a> {
             ));
         }
         let expr = self.parse_expr()?;
-        Ok(crate::ast::SetClause {
+        let set_clause = crate::ast::SetClause {
             column_name,
             expr: Box::new(expr),
-        })
+        };
+        debug!("parse_set_clause: returning set_clause: {:#?}", set_clause);
+        Ok(set_clause)
     }
+
     fn parse_delete(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_delete: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if !keyword.eq_ignore_ascii_case("FROM") {
                 return Err(format!(
@@ -1570,16 +1725,20 @@ impl<'a> Parser<'a> {
             indexed_by: None,
             not_indexed: false,
         };
-        Ok(Stmt::Delete {
+        let stmt = Stmt::Delete {
             with_clause: None,
             qualified_table_name,
             where_clause,
             returning_clause: None,
             order_by_clause: None,
             limit_clause: None,
-        })
+        };
+        debug!("parse_delete: returning stmt: {:#?}", stmt);
+        Ok(stmt)
     }
+
     fn parse_window_spec(&mut self) -> Result<crate::ast::WindowSpec<'static>, String> {
+        debug!("parse_window_spec: entry, current_token: {:?}", self.current_token);
         let mut window_name: Option<&'static str> = None;
         let mut partition_by = None;
         let mut order_by = None;
@@ -1801,14 +1960,18 @@ impl<'a> Parser<'a> {
                 ));
             }
         }
-        Ok(crate::ast::WindowSpec {
+        let spec = crate::ast::WindowSpec {
             window_name: convert_option_str(window_name),
             partition_by,
             order_by,
             frame_spec,
-        })
+        };
+        debug!("parse_window_spec: returning WindowSpec: {:#?}", spec);
+        Ok(spec)
     }
+
     fn parse_frame_bound(&mut self) -> Result<crate::ast::FrameBound<'static>, String> {
+        debug!("parse_frame_bound: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(bound_type)) = &self.current_token {
             match bound_type.to_uppercase().as_str() {
                 "UNBOUNDED" => {
@@ -1817,10 +1980,12 @@ impl<'a> Parser<'a> {
                         match direction.to_uppercase().as_str() {
                             "PRECEDING" => {
                                 self.advance();
+                                debug!("parse_frame_bound: found UNBOUNDED PRECEDING");
                                 Ok(crate::ast::FrameBound::UnboundedPreceding)
                             }
                             "FOLLOWING" => {
                                 self.advance();
+                                debug!("parse_frame_bound: found UNBOUNDED FOLLOWING");
                                 Ok(crate::ast::FrameBound::UnboundedFollowing)
                             }
                             _ => Err(format!(
@@ -1840,6 +2005,7 @@ impl<'a> Parser<'a> {
                     if let TokenType::Valid(Token::IDENTIFIER(row)) = &self.current_token {
                         if row.eq_ignore_ascii_case("ROW") {
                             self.advance();
+                            debug!("parse_frame_bound: found CURRENT ROW");
                             Ok(crate::ast::FrameBound::CurrentRow)
                         } else {
                             Err(format!(
@@ -1860,10 +2026,12 @@ impl<'a> Parser<'a> {
                         match direction.to_uppercase().as_str() {
                             "PRECEDING" => {
                                 self.advance();
+                                debug!("parse_frame_bound: found expr PRECEDING");
                                 Ok(crate::ast::FrameBound::Preceding(Box::new(expr)))
                             }
                             "FOLLOWING" => {
                                 self.advance();
+                                debug!("parse_frame_bound: found expr FOLLOWING");
                                 Ok(crate::ast::FrameBound::Following(Box::new(expr)))
                             }
                             _ => Err(format!(
@@ -1885,10 +2053,12 @@ impl<'a> Parser<'a> {
                 match direction.to_uppercase().as_str() {
                     "PRECEDING" => {
                         self.advance();
+                        debug!("parse_frame_bound: found expr PRECEDING (no identifier)");
                         Ok(crate::ast::FrameBound::Preceding(Box::new(expr)))
                     }
                     "FOLLOWING" => {
                         self.advance();
+                        debug!("parse_frame_bound: found expr FOLLOWING (no identifier)");
                         Ok(crate::ast::FrameBound::Following(Box::new(expr)))
                     }
                     _ => Err(format!(
@@ -1904,7 +2074,9 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
     fn parse_lambda(&mut self) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_lambda: entry, current_token: {:?}", self.current_token);
         let mut parameters = Vec::<&'static str>::new();
         if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
             self.advance();
@@ -1960,9 +2132,13 @@ impl<'a> Parser<'a> {
             ));
         }
         let body = Box::new(self.parse_expr()?);
-        Ok(crate::ast::Expr::Lambda { parameters, body })
+        let lambda = crate::ast::Expr::Lambda { parameters, body };
+        debug!("parse_lambda: returning lambda: {:#?}", lambda);
+        Ok(lambda)
     }
+
     fn parse_function_call(&mut self, name: &str) -> Result<crate::ast::Expr<'static>, String> {
+        debug!("parse_function_call: entry, name: {}, current_token: {:?}", name, self.current_token);
         let function_name = Box::leak(name.to_string().into_boxed_str());
         if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
             self.advance();
@@ -2032,14 +2208,18 @@ impl<'a> Parser<'a> {
                 over_clause = Some(Box::new(window_spec));
             }
         }
-        Ok(crate::ast::Expr::FunctionCall {
+        let func_call = crate::ast::Expr::FunctionCall {
             name: function_name,
             args,
             filter_clause,
             over_clause,
-        })
+        };
+        debug!("parse_function_call: returning FunctionCall: {:#?}", func_call);
+        Ok(func_call)
     }
+
     fn parse_alter(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_alter: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("TABLE") {
                 self.advance();
@@ -2048,9 +2228,12 @@ impl<'a> Parser<'a> {
             // In the future we can add other ALTER types here (e.g., ALTER INDEX)
             return Err(format!("Unsupported ALTER type: {}", id));
         }
+        debug!("parse_alter: error, expected TABLE after ALTER, found {:?}", self.current_token);
         Err("Expected TABLE after ALTER".to_string())
     }
+
     fn parse_alter_table(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_alter_table: entry, current_token: {:?}", self.current_token);
         // Handle IF NOT EXISTS
         let mut if_not_exists = false;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
@@ -2125,16 +2308,19 @@ impl<'a> Parser<'a> {
             return self.parse_alter_table_action(None, id.into_static());
         }
 
+        debug!("parse_alter_table: error, expected table name after ALTER TABLE, found {:?}", self.current_token);
         Err(format!(
             "Expected table name after ALTER TABLE, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_alter_table_action(
         &mut self,
         schema_name: Option<&'static str>,
         table_name: &'static str,
     ) -> Result<Stmt<'static>, String> {
+        debug!("parse_alter_table_action: entry, schema_name: {:?}, table_name: {:?}, current_token: {:?}", schema_name, table_name, self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(action)) = &self.current_token {
             if action.eq_ignore_ascii_case("RENAME") {
                 self.advance();
@@ -2281,12 +2467,15 @@ impl<'a> Parser<'a> {
             }
         }
 
+        debug!("parse_alter_table_action: error, expected ALTER TABLE action (RENAME, ADD, DROP), found {:?}", self.current_token);
         Err(format!(
             "Expected ALTER TABLE action (RENAME, ADD, DROP), found {:?}",
             self.current_token
         ))
     }
+
     fn parse_create(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_create: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("TABLE") {
                 self.advance();
@@ -2303,12 +2492,15 @@ impl<'a> Parser<'a> {
             }
             // Add other CREATE types as needed
         }
+        debug!("parse_create: error, expected TABLE, INDEX, VIEW, or TRIGGER after CREATE, found {:?}", self.current_token);
         Err(format!(
             "Expected TABLE, INDEX, VIEW, or TRIGGER after CREATE, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_create_table(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_create_table: entry, current_token: {:?}", self.current_token);
         // Handle IF NOT EXISTS
         let mut if_not_exists = false;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
@@ -2368,22 +2560,25 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 let table_name = convert_str(name);
-                return self.parse_create_table_body(None, table_name, if_not_exists);
+                return self.parse_create_table_body(schema_name, table_name, if_not_exists);
             }
         }
 
+        debug!("parse_create_table: error, expected table name, found {:?}", self.current_token);
         Err(format!(
             "Expected table name, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_create_table_body(
         &mut self,
         schema_name: Option<&'static str>,
         table_name: &'static str,
         if_not_exists: bool,
     ) -> Result<Stmt<'static>, String> {
-        // Parse AS SELECT or column definitions
+        debug!("parse_create_table_body: entry, schema_name: {:?}, table_name: {:?}, if_not_exists: {}, current_token: {:?}", schema_name, table_name, if_not_exists, self.current_token);
+        // Accept AS SELECT or column definitions
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("AS") {
                 self.advance();
@@ -2397,7 +2592,7 @@ impl<'a> Parser<'a> {
                                 if_not_exists,
                                 schema_name,
                                 table_name,
-                                body: Box::new(CreateTableBody::AsSelect(select_box)), // Box<SelectStmt> is needed, not dereference
+                                body: Box::new(CreateTableBody::AsSelect(select_box)),
                             });
                         } else {
                             return Err("Expected SELECT statement".to_string());
@@ -2405,46 +2600,43 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-
-            // Parse column definitions and constraints
-            if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
-                self.advance();
-                let (columns, constraints) = self.parse_column_defs_and_constraints()?;
-
-                if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
-                    self.advance();
-                    return Ok(Stmt::CreateTable {
-                        temp_temporary: None, // Assuming non-temporary
-                        if_not_exists,
-                        schema_name,
-                        table_name,
-                        body: Box::new(CreateTableBody::ColumnsAndConstraints {
-                            columns,
-                            constraints,
-                        }),
-                    });
-                } else {
-                    return Err(format!(
-                        "Expected ) to close CREATE TABLE definition, found {:?}",
-                        self.current_token
-                    ));
-                }
-            }
-
-            Err(format!(
-                "Expected AS or ( after table name, found {:?}",
-                self.current_token
-            ))
-        } else {
-            Err(format!(
-                "Expected identifier after CREATE TABLE, found {:?}",
-                self.current_token
-            ))
+            debug!("parse_create_table_body: error, expected SELECT after AS, found {:?}", self.current_token);
+            return Err(format!("Expected SELECT after AS, found {:?}", self.current_token));
         }
+        // Accept column definitions if next token is LEFT_PAREN
+        if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+            self.advance();
+            let (columns, constraints) = self.parse_column_defs_and_constraints()?;
+            if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                self.advance();
+                return Ok(Stmt::CreateTable {
+                    temp_temporary: None, // Assuming non-temporary
+                    if_not_exists,
+                    schema_name,
+                    table_name,
+                    body: Box::new(CreateTableBody::ColumnsAndConstraints {
+                        columns,
+                        constraints,
+                    }),
+                });
+            } else {
+                return Err(format!(
+                    "Expected ) to close CREATE TABLE definition, found {:?}",
+                    self.current_token
+                ));
+            }
+        }
+        debug!("parse_create_table_body: error, expected AS or ( after table name, found {:?}", self.current_token);
+        Err(format!(
+            "Expected AS or ( after table name, found {:?}",
+            self.current_token
+        ))
     }
+
     fn parse_column_defs_and_constraints(
         &mut self,
     ) -> Result<(Vec<ColumnDef<'static>>, Vec<TableConstraint<'static>>), String> {
+        debug!("parse_column_defs_and_constraints: entry, current_token: {:?}", self.current_token);
         let mut columns = Vec::new();
         let mut constraints = Vec::new();
 
@@ -2475,9 +2667,12 @@ impl<'a> Parser<'a> {
             }
         }
 
+        debug!("parse_column_defs_and_constraints: returning columns: {:#?}, constraints: {:#?}", columns, constraints);
         Ok((columns, constraints))
     }
+
     fn parse_column_def(&mut self) -> Result<ColumnDef<'static>, String> {
+        debug!("parse_column_def: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             let column_name = convert_str(id.to_string());
             self.advance();
@@ -2578,19 +2773,24 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            return Ok(ColumnDef {
+            let col_def = ColumnDef {
                 name: column_name,
                 type_name,
                 constraints,
-            });
+            };
+            debug!("parse_column_def: returning col_def: {:#?}", col_def);
+            return Ok(col_def);
         }
 
+        debug!("parse_column_def: error, expected column name, found {:?}", self.current_token);
         Err(format!(
             "Expected column name, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_table_constraint(&mut self) -> Result<TableConstraint<'static>, String> {
+        debug!("parse_table_constraint: entry, current_token: {:?}", self.current_token);
         // For simplicity, we'll just implement a basic version that parses PRIMARY KEY constraints
         let mut constraint_name = None;
 
@@ -2672,11 +2872,13 @@ impl<'a> Parser<'a> {
 
                                 if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
                                     self.advance();
-                                    return Ok(TableConstraint::PrimaryKey {
+                                    let pk = TableConstraint::PrimaryKey {
                                         name: constraint_name,
                                         columns,
                                         conflict_clause: None, // We could parse conflict clause here
-                                    });
+                                    };
+                                    debug!("parse_table_constraint: returning PrimaryKey: {:#?}", pk);
+                                    return Ok(pk);
                                 }
                             }
                         }
@@ -2685,12 +2887,15 @@ impl<'a> Parser<'a> {
             }
         }
 
+        debug!("parse_table_constraint: error, expected PRIMARY KEY, UNIQUE, CHECK or FOREIGN KEY constraint, found {:?}", self.current_token);
         Err(format!(
             "Expected PRIMARY KEY, UNIQUE, CHECK or FOREIGN KEY constraint, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_drop(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_drop: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("TABLE") {
                 self.advance();
@@ -2730,11 +2935,13 @@ impl<'a> Parser<'a> {
                             if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
                                 let table_name = convert_str(id.to_string());
                                 self.advance();
-                                return Ok(Stmt::DropTable {
+                                let drop_stmt = Stmt::DropTable {
                                     if_exists,
                                     schema_name: schema,
                                     table_name,
-                                });
+                                };
+                                debug!("parse_drop: returning DropTable: {:#?}", drop_stmt);
+                                return Ok(drop_stmt);
                             } else {
                                 return Err(format!(
                                     "Expected table name after schema name, found {:?}",
@@ -2743,11 +2950,13 @@ impl<'a> Parser<'a> {
                             }
                         } else {
                             let table_name = convert_str(name);
-                            return Ok(Stmt::DropTable {
+                            let drop_stmt = Stmt::DropTable {
                                 if_exists,
                                 schema_name: None,
                                 table_name,
-                            });
+                            };
+                            debug!("parse_drop: returning DropTable: {:#?}", drop_stmt);
+                            return Ok(drop_stmt);
                         }
                     } else {
                         return Err(format!(
@@ -2758,12 +2967,15 @@ impl<'a> Parser<'a> {
             }
         }
 
+        debug!("parse_drop: error, expected TABLE, INDEX, VIEW or TRIGGER after DROP, found {:?}", self.current_token);
         Err(format!(
             "Expected TABLE, INDEX, VIEW or TRIGGER after DROP, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_insert(&mut self) -> Result<Stmt<'static>, String> {
+        debug!("parse_insert: entry, current_token: {:?}", self.current_token);
         // Support for INSERT INTO syntax
         if let TokenType::Valid(Token::IDENTIFIER(into)) = &self.current_token {
             if !into.eq_ignore_ascii_case("INTO") {
@@ -2841,7 +3053,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let values = self.parse_insert_values()?;
 
-                return Ok(Stmt::Insert {
+                let insert_stmt = Stmt::Insert {
                     with_clause: None,
                     or_conflict: None,
                     schema_name,
@@ -2850,12 +3062,14 @@ impl<'a> Parser<'a> {
                     column_names,
                     data_source: crate::ast::InsertDataSource::Values(values),
                     returning_clause: None,
-                });
+                };
+                debug!("parse_insert: returning Insert (VALUES): {:#?}", insert_stmt);
+                return Ok(insert_stmt);
             } else if values_or_select.eq_ignore_ascii_case("SELECT") {
                 self.advance();
                 let select_stmt = self.parse_select()?;
                 if let Stmt::Select(select_box) = select_stmt {
-                    return Ok(Stmt::Insert {
+                    let insert_stmt = Stmt::Insert {
                         with_clause: None,
                         or_conflict: None,
                         schema_name,
@@ -2864,7 +3078,9 @@ impl<'a> Parser<'a> {
                         column_names,
                         data_source: crate::ast::InsertDataSource::Select(select_box),
                         returning_clause: None,
-                    });
+                    };
+                    debug!("parse_insert: returning Insert (SELECT): {:#?}", insert_stmt);
+                    return Ok(insert_stmt);
                 } else {
                     return Err("Expected SELECT statement".to_string());
                 }
@@ -2873,7 +3089,7 @@ impl<'a> Parser<'a> {
                 if let TokenType::Valid(Token::IDENTIFIER(values)) = &self.current_token {
                     if values.eq_ignore_ascii_case("VALUES") {
                         self.advance();
-                        return Ok(Stmt::Insert {
+                        let insert_stmt = Stmt::Insert {
                             with_clause: None,
                             or_conflict: None,
                             schema_name,
@@ -2882,18 +3098,23 @@ impl<'a> Parser<'a> {
                             column_names,
                             data_source: crate::ast::InsertDataSource::DefaultValues,
                             returning_clause: None,
-                        });
+                        };
+                        debug!("parse_insert: returning Insert (DEFAULT VALUES): {:#?}", insert_stmt);
+                        return Ok(insert_stmt);
                     }
                 }
             }
         }
 
+        debug!("parse_insert: error, expected VALUES, SELECT or DEFAULT VALUES, found {:?}", self.current_token);
         Err(format!(
             "Expected VALUES, SELECT or DEFAULT VALUES, found {:?}",
             self.current_token
         ))
     }
+
     fn parse_insert_values(&mut self) -> Result<Vec<Vec<Expr<'static>>>, String> {
+        debug!("parse_insert_values: entry, current_token: {:?}", self.current_token);
         let mut values_list = Vec::new();
 
         // Parse first row
@@ -2914,12 +3135,16 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            debug!("parse_insert_values: returning values_list: {:#?}", values_list);
             return Ok(values_list);
         }
 
+        debug!("parse_insert_values: error, expected (, found {:?}", self.current_token);
         Err(format!("Expected (, found {:?}", self.current_token))
     }
+    
     fn parse_insert_value_list(&mut self) -> Result<Vec<Expr<'static>>, String> {
+        debug!("parse_insert_value_list: entry, current_token: {:?}", self.current_token);
         let mut values = Vec::new();
 
         // Handle empty list case
@@ -2937,51 +3162,18 @@ impl<'a> Parser<'a> {
 
         if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
             self.advance();
+            debug!("parse_insert_value_list: returning values: {:#?}", values);
             return Ok(values);
         }
 
+        debug!("parse_insert_value_list: error, expected ) to close value list, found {:?}", self.current_token);
         Err(format!(
             "Expected ) to close value list, found {:?}",
             self.current_token
         ))
     }
 }
-fn parse_expr_string(input: &str) -> Result<crate::ast::Expr<'static>, String> {
-    if input.is_empty() {
-        return Err("Empty expression".to_string());
-    }
-    if input.parse::<i64>().is_ok() {
-        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Numeric(
-            convert_str(input.to_string()),
-        )));
-    }
-    if (input.starts_with('\'') && input.ends_with('\''))
-        || (input.starts_with('"') && input.ends_with('"'))
-    {
-        let content = &input[1..input.len() - 1];
-        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::String(
-            convert_str(content.to_string()),
-        )));
-    }
-    if input.eq_ignore_ascii_case("NULL") {
-        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Null));
-    }
-    if input.eq_ignore_ascii_case("TRUE") {
-        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Keyword(
-            "TRUE",
-        )));
-    }
-    if input.eq_ignore_ascii_case("FALSE") {
-        return Ok(crate::ast::Expr::Literal(crate::ast::Literal::Keyword(
-            "FALSE",
-        )));
-    }
-    Ok(crate::ast::Expr::Column {
-        schema_name: None,
-        table_name: None,
-        column_name: convert_str(input.to_string()),
-    })
-}
+
 pub fn parse(input: &str) -> Result<Vec<Stmt<'static>>, String> {
     let mut parser = Parser::new(input);
     if let TokenType::EndOfInput = parser.current_token {
@@ -2990,61 +3182,72 @@ pub fn parse(input: &str) -> Result<Vec<Stmt<'static>>, String> {
     let stmt = parser.parse_statement()?;
     Ok(vec![stmt])
 }
+
 pub fn parse_statement(input: &str) -> Result<Stmt<'static>, String> {
     let mut parser = Parser::new(input);
     parser.parse_statement()
 }
+
 pub trait IntoStatic<'a> {
     type Output;
     fn into_static(self) -> Self::Output;
 }
+
 impl<'a> IntoStatic<'a> for &'a str {
     type Output = &'static str;
     fn into_static(self) -> Self::Output {
         convert_str(self.to_string())
     }
 }
+
 impl<'a> IntoStatic<'a> for String {
     type Output = &'static str;
     fn into_static(self) -> Self::Output {
         convert_str(self)
     }
 }
+
 impl<'a> IntoStatic<'a> for Option<&'a str> {
     type Output = Option<&'static str>;
     fn into_static(self) -> Self::Output {
         self.map(|s| s.into_static())
     }
 }
+
 impl<'a> IntoStatic<'a> for Option<String> {
     type Output = Option<&'static str>;
     fn into_static(self) -> Self::Output {
         self.map(|s| s.into_static())
     }
 }
+
 impl<'a> IntoStatic<'a> for Vec<&'a str> {
     type Output = Vec<&'static str>;
     fn into_static(self) -> Self::Output {
         self.into_iter().map(|s| s.into_static()).collect()
     }
 }
+
 impl<'a> IntoStatic<'a> for Vec<String> {
     type Output = Vec<&'static str>;
     fn into_static(self) -> Self::Output {
         self.into_iter().map(|s| s.into_static()).collect()
     }
 }
+
 fn convert_mut_str_vec<'a>(vec: Vec<&'a mut str>) -> Vec<&'static str> {
     vec.into_iter()
         .map(|s| convert_str(s.to_string()))
         .collect()
 }
+
 fn convert_option_mut_str(opt: Option<&mut str>) -> Option<&'static str> {
     match opt {
         Some(s) => Some(convert_str(s.to_string())),
         None => None,
     }
 }
+
 fn convert_str(s: String) -> &'static str {
     // This is more efficient than Box::leak
     unsafe {
@@ -3054,12 +3257,14 @@ fn convert_str(s: String) -> &'static str {
         static_str
     }
 }
+
 fn convert_option_str(opt: Option<&str>) -> Option<&'static str> {
     match opt {
         Some(s) => Some(convert_str(s.to_string())),
         None => None,
     }
 }
+
 pub fn print_ast(stmt: &crate::ast::Stmt) {
     println!("{:#?}", stmt);
 }

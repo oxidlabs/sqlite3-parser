@@ -102,18 +102,16 @@ fn bench_window_functions(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_repeated_parsing(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Repeated Parsing");
+fn bench_parsing(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Parsing");
     let query = "SELECT * FROM users WHERE id = 42;";
     group.throughput(Throughput::Bytes(query.len() as u64));
     group.bench_with_input(
-        BenchmarkId::new("logos_parser", "repeated"),
+        BenchmarkId::new("logos_parser", "Normal"),
         &query,
         |b, q| {
             b.iter(|| {
-                for _ in 0..1000 {
                     let _ = black_box(parse_statement(black_box(*q)));
-                }
             })
         },
     );
@@ -122,8 +120,8 @@ fn bench_repeated_parsing(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_parsers,
-    bench_window_functions,
-    bench_repeated_parsing
+    //bench_parsers,
+    //bench_window_functions,
+    bench_parsing
 );
 criterion_main!(benches);
