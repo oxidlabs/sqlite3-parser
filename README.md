@@ -13,6 +13,12 @@ This project implements a parser for SQLite3 SQL statements, focusing on high pe
 - Memory-efficient parsing
 - Clear and well-structured AST
 
+## Limitations
+
+- Does not support UNION
+- Does not support INTERSECT
+- Does not support EXCEPT
+
 ## Usage
 
 ```rust

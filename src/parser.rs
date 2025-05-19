@@ -44,6 +44,149 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses a WITH clause (Common Table Expressions)
+    fn parse_with_clause(&mut self) -> Result<crate::ast::WithClause<'static>, String> {
+        // Consume WITH
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("WITH") {
+                self.advance();
+            } else {
+                return Err("Expected WITH keyword".to_string());
+            }
+        } else {
+            return Err("Expected WITH keyword".to_string());
+        }
+
+        // Optional RECURSIVE
+        let mut recursive = false;
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("RECURSIVE") {
+                recursive = true;
+                self.advance();
+            }
+        }
+
+        let mut cte_tables = Vec::new();
+        loop {
+            // Parse CTE name
+            let table_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+                let name = Box::leak(id.to_string().into_boxed_str());
+                self.advance();
+                name
+            } else {
+                return Err(format!("Expected CTE table name, found {:?}", self.current_token));
+            };
+
+            // Optional column list
+            let column_names = if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                self.advance();
+                let mut columns = Vec::new();
+                loop {
+                    if let TokenType::Valid(Token::IDENTIFIER(col_id)) = self.current_token {
+                        columns.push(convert_str(col_id.to_string()));
+                        self.advance();
+                        if let TokenType::Valid(Token::COMMA) = &self.current_token {
+                            self.advance();
+                        } else if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                            self.advance();
+                            break;
+                        } else {
+                            return Err(format!("Expected ',' or ')' in CTE column list, found {:?}", self.current_token));
+                        }
+                    } else {
+                        return Err(format!("Expected column name in CTE column list, found {:?}", self.current_token));
+                    }
+                }
+                Some(columns)
+            } else {
+                None
+            };
+
+            // Optional MATERIALIZED or NOT MATERIALIZED
+            let mut materialized = None;
+            if let TokenType::Valid(Token::IDENTIFIER(mat_kw)) = &self.current_token {
+                if mat_kw.eq_ignore_ascii_case("MATERIALIZED") {
+                    materialized = Some(true);
+                    self.advance();
+                } else if mat_kw.eq_ignore_ascii_case("NOT") {
+                    // Check for NOT MATERIALIZED
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(mat2)) = &self.current_token {
+                        if mat2.eq_ignore_ascii_case("MATERIALIZED") {
+                            materialized = Some(false);
+                            self.advance();
+                        } else {
+                            return Err(format!("Expected MATERIALIZED after NOT, found {:?}", self.current_token));
+                        }
+                    } else {
+                        return Err(format!("Expected MATERIALIZED after NOT, found {:?}", self.current_token));
+                    }
+                }
+            }
+
+            // Expect AS
+            if let TokenType::Valid(Token::IDENTIFIER(as_kw)) = &self.current_token {
+                if as_kw.eq_ignore_ascii_case("AS") {
+                    self.advance();
+                } else {
+                    return Err(format!("Expected AS after CTE name, found {:?}", self.current_token));
+                }
+            } else {
+                return Err(format!("Expected AS after CTE name, found {:?}", self.current_token));
+            }
+
+            // Expect (
+            if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                self.advance();
+            } else {
+                return Err(format!("Expected '(' before CTE subquery, found {:?}", self.current_token));
+            }
+
+            // Parse the subquery (must be SELECT)
+            if let TokenType::Valid(Token::IDENTIFIER(sel_kw)) = &self.current_token {
+                if sel_kw.eq_ignore_ascii_case("SELECT") {
+                    self.advance();
+                } else {
+                    return Err(format!("Expected SELECT at start of CTE subquery, found {:?}", self.current_token));
+                }
+            } else {
+                return Err(format!("Expected SELECT at start of CTE subquery, found {:?}", self.current_token));
+            }
+            let select_stmt = match self.parse_select(None) {
+                Ok(Stmt::Select(stmt)) => stmt,
+                Ok(_) => return Err("CTE subquery did not produce a SELECT statement".to_string()),
+                Err(e) => return Err(format!("Error parsing CTE subquery: {}", e)),
+            };
+
+            // Expect ) after subquery
+            if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                self.advance();
+            } else {
+                return Err(format!("Expected ')' after CTE subquery, found {:?}", self.current_token));
+            }
+
+            cte_tables.push(crate::ast::CommonTableExpression {
+                table_name,
+                column_names,
+                select_stmt,
+                materialized,
+            });
+
+            // If comma, continue to next CTE
+            if let TokenType::Valid(Token::COMMA) = &self.current_token {
+                self.advance();
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        Ok(crate::ast::WithClause {
+            recursive,
+            cte_tables,
+        })
+    }
+
     fn advance(&mut self) {
         debug!("advance() called, current_token: {:?}", self.current_token);
         let lexer_next_result = self.lexer.next();
@@ -59,24 +202,51 @@ impl<'a> Parser<'a> {
 
     pub fn parse_statement(&mut self) -> Result<Stmt<'static>, String> {
         debug!("parse_statement() called, current_token: {:?}", self.current_token);
+        // --- WITH clause support ---
+        if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
+            if id.eq_ignore_ascii_case("WITH") {
+                let with_clause = self.parse_with_clause()?;
+                // After WITH, expect SELECT/INSERT/UPDATE/DELETE
+                if let TokenType::Valid(Token::IDENTIFIER(next)) = &self.current_token {
+                    if next.eq_ignore_ascii_case("SELECT") {
+                        self.advance();
+                        return self.parse_select(Some(with_clause));
+                    } else if next.eq_ignore_ascii_case("INSERT") {
+                        self.advance();
+                        return self.parse_insert(Some(with_clause));
+                    } else if next.eq_ignore_ascii_case("UPDATE") {
+                        self.advance();
+                        return self.parse_update(Some(with_clause));
+                    } else if next.eq_ignore_ascii_case("DELETE") {
+                        self.advance();
+                        return self.parse_delete(Some(with_clause));
+                    } else {
+                        return Err(format!("Expected SELECT, INSERT, UPDATE, or DELETE after WITH, found {:?}", self.current_token));
+                    }
+                } else {
+                    return Err(format!("Expected statement after WITH clause, found {:?}", self.current_token));
+                }
+            }
+        }
+        // --- END WITH clause support ---
         match &self.current_token {
             TokenType::Valid(Token::IDENTIFIER(id)) => {
                 if id.eq_ignore_ascii_case("SELECT") {
                     debug!("parse_statement: found SELECT");
                     self.advance();
-                    self.parse_select()
+                    self.parse_select(None)
                 } else if id.eq_ignore_ascii_case("INSERT") {
                     debug!("parse_statement: found INSERT");
                     self.advance();
-                    self.parse_insert()
+                    self.parse_insert(None)
                 } else if id.eq_ignore_ascii_case("UPDATE") {
                     debug!("parse_statement: found UPDATE");
                     self.advance();
-                    self.parse_update()
+                    self.parse_update(None)
                 } else if id.eq_ignore_ascii_case("DELETE") {
                     debug!("parse_statement: found DELETE");
                     self.advance();
-                    self.parse_delete()
+                    self.parse_delete(None)
                 } else if id.eq_ignore_ascii_case("CREATE") {
                     debug!("parse_statement: found CREATE");
                     self.advance();
@@ -133,10 +303,18 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_select(&mut self) -> Result<Stmt<'static>, String> {
+    fn parse_select(&mut self, with_clause: Option<crate::ast::WithClause<'static>>) -> Result<Stmt<'static>, String> {
         debug!("parse_select() called, current_token: {:?}", self.current_token);
+        // If entering with SELECT or WITH, advance past it
+        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
+            if keyword.eq_ignore_ascii_case("SELECT") || keyword.eq_ignore_ascii_case("WITH") {
+                debug!("parse_select: advancing past {:?}", self.current_token);
+                self.advance();
+            }
+        }
         let result_columns = self.parse_result_columns()?;
         debug!("parse_select: after parse_result_columns, current_token: {:?}", self.current_token);
+        debug!("parse_select: result_columns: {:?}", result_columns);
         // Expect FROM
         match &self.current_token {
             TokenType::Valid(Token::IDENTIFIER(keyword))
@@ -289,7 +467,7 @@ impl<'a> Parser<'a> {
             window_clause: None,
         };
         let select_stmt = SelectStmt {
-            with_clause: None,
+            with_clause,
             compound_operator: None,
             select_core,
             order_by_clause,
@@ -386,13 +564,15 @@ impl<'a> Parser<'a> {
             debug!("parse_result_columns: returning AllColumns");
             return Ok(columns);
         }
+        debug!("parse_result_columns: about to parse first result column, current_token: {:?}", self.current_token);
         columns.push(self.parse_result_column()?);
         while let TokenType::Valid(Token::COMMA) = &self.current_token {
-            debug!("parse_result_columns: found COMMA");
+            debug!("parse_result_columns: found COMMA, current_token: {:?}", self.current_token);
             self.advance();
+            debug!("parse_result_columns: after advance, current_token: {:?}", self.current_token);
             columns.push(self.parse_result_column()?);
         }
-        debug!("parse_result_columns: returning columns: {:?}", columns);
+        debug!("parse_result_columns: returning columns: {:?}, current_token: {:?}", columns, self.current_token);
         Ok(columns)
     }
 
@@ -494,8 +674,10 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 let expr = if let TokenType::Valid(Token::LEFT_PAREN) = &self.current_token {
+                    debug!("parse_result_column: Detected function call for identifier '{}', current_token: {:?}", id_str, self.current_token);
                     self.parse_function_call(&id_str.to_string())?
                 } else {
+                    debug!("parse_result_column: Treating '{}' as column, current_token: {:?}", id_str, self.current_token);
                     crate::ast::Expr::Column {
                         schema_name: None,
                         table_name: None,
@@ -559,15 +741,20 @@ impl<'a> Parser<'a> {
                 Ok(rc)
             }
             _ => {
+                debug!("parse_result_column: About to parse general expr for result column, current_token: {:?}", self.current_token);
                 let expr = self.parse_expr()?;
+                debug!("parse_result_column: Parsed expr: {:?}, current_token: {:?}", expr, self.current_token);
                 let mut alias: Option<&'static str> = None;
                 if let TokenType::Valid(Token::IDENTIFIER(as_id)) = &self.current_token {
                     if as_id.eq_ignore_ascii_case("AS") {
+                        debug!("parse_result_column: Found AS for alias, current_token: {:?}", self.current_token);
                         self.advance();
                         if let TokenType::Valid(Token::IDENTIFIER(alias_id)) = &self.current_token {
                             alias = Some(Box::leak(alias_id.to_string().into_boxed_str()));
+                            debug!("parse_result_column: Found alias '{}', advancing", alias_id);
                             self.advance();
                         } else {
+                            debug!("parse_result_column: Expected alias name after AS, found {:?}", self.current_token);
                             return Err(format!(
                                 "Expected alias name after AS, found {:?}",
                                 self.current_token
@@ -579,7 +766,7 @@ impl<'a> Parser<'a> {
                     expr: Box::new(expr),
                     alias: convert_option_str(alias),
                 };
-                debug!("parse_result_column: returning expr: {:?}", rc);
+                debug!("parse_result_column: returning expr: {:?}, current_token: {:?}", rc, self.current_token);
                 Ok(rc)
             }
         }
@@ -869,7 +1056,7 @@ impl<'a> Parser<'a> {
                 if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
                     if id.eq_ignore_ascii_case("SELECT") {
                         self.advance();
-                        let stmt = self.parse_select()?;
+                        let stmt = self.parse_select(None)?;
                         let select_stmt = if let Stmt::Select(box_select) = stmt {
                             *box_select
                         } else {
@@ -1206,7 +1393,7 @@ impl<'a> Parser<'a> {
                                 if sel_kw.eq_ignore_ascii_case("SELECT") {
                                     self.advance();
                                     // println!("[DEBUG] After advance (SELECT in IN), current_token: {:?}", self.current_token);
-                                    let subquery_stmt = self.parse_select()?;
+                                    let subquery_stmt = self.parse_select(None)?;
                                     // println!("[DEBUG] After parse_select (IN subquery), current_token: {:?}", self.current_token);
                                     if let TokenType::Valid(Token::RIGHT_PAREN) =
                                         &self.current_token
@@ -1521,7 +1708,35 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenType::Valid(Token::LEFT_PAREN) => {
+                debug!("parse_primary_expr: found LEFT_PAREN, advancing");
                 self.advance();
+                debug!("parse_primary_expr: after advance, current_token: {:?}", self.current_token);
+                // Check for subquery: (SELECT ...)
+                if let TokenType::Valid(Token::IDENTIFIER(kw)) = &self.current_token {
+                    debug!("parse_primary_expr: after LEFT_PAREN, found IDENTIFIER: {}", kw);
+                    if kw.eq_ignore_ascii_case("SELECT") || kw.eq_ignore_ascii_case("WITH") {
+                        debug!("parse_primary_expr: Detected start of subquery, calling parse_select with current_token: {:?}", self.current_token);
+                        // DO NOT advance past SELECT/WITH, let parse_select handle it
+                        let select_stmt = match self.parse_select(None) {
+                            Ok(crate::ast::Stmt::Select(stmt)) => stmt,
+                            Ok(_) => return Err("Subquery did not produce a SELECT statement".to_string()),
+                            Err(e) => return Err(format!("Error parsing subquery: {}", e)),
+                        };
+                        debug!("parse_primary_expr: after parse_select for subquery, current_token: {:?}", self.current_token);
+                        if let TokenType::Valid(Token::RIGHT_PAREN) = &self.current_token {
+                            debug!("parse_primary_expr: found RIGHT_PAREN after subquery");
+                            self.advance();
+                            return Ok(crate::ast::Expr::Subquery(select_stmt));
+                        } else {
+                            debug!("parse_primary_expr: Expected ) after subquery, found {:?}", self.current_token);
+                            return Err(format!(
+                                "Expected ) after subquery, found {:?}",
+                                self.current_token
+                            ));
+                        }
+                    }
+                }
+                // Otherwise, parse as parenthesized expression
                 let expr = self.parse_expr()?;
                 match &self.current_token {
                     TokenType::Valid(Token::RIGHT_PAREN) => {
@@ -1606,7 +1821,7 @@ impl<'a> Parser<'a> {
         ))
     }
     
-    fn parse_update(&mut self) -> Result<Stmt<'static>, String> {
+    fn parse_update(&mut self, with_clause: Option<crate::ast::WithClause<'static>>) -> Result<Stmt<'static>, String> {
         debug!("parse_update: entry, current_token: {:?}", self.current_token);
         let table_name = if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             let name = id.to_string().into_static();
@@ -1696,7 +1911,7 @@ impl<'a> Parser<'a> {
         Ok(set_clause)
     }
 
-    fn parse_delete(&mut self) -> Result<Stmt<'static>, String> {
+    fn parse_delete(&mut self, with_clause: Option<crate::ast::WithClause<'static>>) -> Result<Stmt<'static>, String> {
         debug!("parse_delete: entry, current_token: {:?}", self.current_token);
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if !keyword.eq_ignore_ascii_case("FROM") {
@@ -2451,7 +2666,6 @@ impl<'a> Parser<'a> {
                                 self.advance();
                                 if_not_exists = true;
                             } else {
-                                return Err(format!("Expected EXISTS after IF NOT, found {:?}", self.current_token));
                                 return Err(format!(
                                     "Expected EXISTS after IF NOT, found {:?}",
                                     self.current_token
@@ -2523,7 +2737,7 @@ impl<'a> Parser<'a> {
                 if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
                     if id.eq_ignore_ascii_case("SELECT") {
                         self.advance();
-                        let select_stmt = self.parse_select()?;
+                        let select_stmt = self.parse_select(None)?;
                         if let Stmt::Select(select_box) = select_stmt {
                             return Ok(Stmt::CreateTable {
                                 temp_temporary: None, // Assuming non-temporary
@@ -2912,7 +3126,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    fn parse_insert(&mut self) -> Result<Stmt<'static>, String> {
+    fn parse_insert(&mut self, with_clause: Option<crate::ast::WithClause<'static>>) -> Result<Stmt<'static>, String> {
         debug!("parse_insert: entry, current_token: {:?}", self.current_token);
         // Support for INSERT INTO syntax
         if let TokenType::Valid(Token::IDENTIFIER(into)) = &self.current_token {
@@ -3005,7 +3219,7 @@ impl<'a> Parser<'a> {
                 return Ok(insert_stmt);
             } else if values_or_select.eq_ignore_ascii_case("SELECT") {
                 self.advance();
-                let select_stmt = self.parse_select()?;
+                let select_stmt = self.parse_select(None)?;
                 if let Stmt::Select(select_box) = select_stmt {
                     let insert_stmt = Stmt::Insert {
                         with_clause: None,

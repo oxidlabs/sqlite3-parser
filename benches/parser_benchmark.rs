@@ -120,8 +120,8 @@ fn bench_parsing(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    //bench_parsers,
-    //bench_window_functions,
+    bench_parsers,
+    bench_window_functions,
     bench_parsing
 );
 criterion_main!(benches);
