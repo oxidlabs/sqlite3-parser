@@ -120,11 +120,13 @@ pub enum Stmt<'a> {
         into_file: Option<Box<Expr<'a>>>,
     },
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TempTemporary {
     Temp,
     Temporary,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CreateTableBody<'a> {
     ColumnsAndConstraints {
@@ -133,6 +135,7 @@ pub enum CreateTableBody<'a> {
     },
     AsSelect(Box<SelectStmt<'a>>),
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexedColumn<'a> {
     pub column_name: &'a str,
@@ -140,11 +143,13 @@ pub struct IndexedColumn<'a> {
     pub collation: Option<&'a str>,
     pub order: Option<ColumnOrder>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColumnOrder {
     Ascending,
     Descending,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr<'a> {
     Literal(Literal<'a>),
@@ -242,6 +247,7 @@ pub enum Expr<'a> {
         body: Box<Expr<'a>>,
     },
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RaiseFunction<'a> {
     Ignore,
@@ -249,6 +255,7 @@ pub enum RaiseFunction<'a> {
     Abort(Box<Expr<'a>>),
     Fail(Box<Expr<'a>>),
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal<'a> {
     Numeric(&'a str),
@@ -260,6 +267,7 @@ pub enum Literal<'a> {
     CurrentTime,
     CurrentTimestamp,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnaryOperator {
     Not,
@@ -267,6 +275,7 @@ pub enum UnaryOperator {
     Positive,
     BitwiseNot,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinaryOperator {
     Equals,
@@ -286,6 +295,7 @@ pub enum BinaryOperator {
     BitwiseOr,
     BitwiseXor,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AlterTable<'a> {
     RenameTable(&'a str),
@@ -296,12 +306,14 @@ pub enum AlterTable<'a> {
     Add(ColumnDef<'a>),
     Drop(&'a str),
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlterTableStmt<'a> {
     pub schema_name: Option<&'a str>,
     pub table_name: &'a str,
     pub stmt: AlterTable<'a>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Analyze<'a> {
     SchemaName(&'a str),
@@ -311,17 +323,20 @@ pub enum Analyze<'a> {
         table_name: &'a str,
     },
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttachStmt<'a> {
     pub schema_name: &'a str,
     pub expr: Box<Expr<'a>>,
 }
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TransactionType {
     Deferred,
     Immediate,
     Exclusive,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectStmt<'a> {
     pub with_clause: Option<WithClause<'a>>,
@@ -330,6 +345,7 @@ pub struct SelectStmt<'a> {
     pub order_by_clause: Option<OrderByClause<'a>>,
     pub limit_clause: Option<LimitClause<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectCore<'a> {
     pub distinct: bool,
@@ -340,6 +356,7 @@ pub struct SelectCore<'a> {
     pub having_clause: Option<Box<Expr<'a>>>,
     pub window_clause: Option<WindowClause<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResultColumn<'a> {
     AllColumns,
@@ -349,11 +366,13 @@ pub enum ResultColumn<'a> {
         alias: Option<&'a str>,
     },
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FromClause<'a> {
     pub tables: Vec<TableOrSubquery<'a>>,
     pub join_clauses: Vec<JoinClause<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TableOrSubquery<'a> {
     Table {
@@ -373,12 +392,14 @@ pub enum TableOrSubquery<'a> {
         alias: Option<&'a str>,
     },
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JoinClause<'a> {
     pub join_type: JoinType,
     pub table_or_subquery: TableOrSubquery<'a>,
     pub constraint: JoinConstraint<'a>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JoinType {
     Inner,
@@ -386,23 +407,28 @@ pub enum JoinType {
     LeftOuter,
     Cross,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JoinConstraint<'a> {
     On(Box<Expr<'a>>),
     Using(Vec<&'a str>),
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupByClause<'a> {
     pub exprs: Vec<Expr<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowClause<'a> {
     pub window_defs: Vec<(WindowName<'a>, WindowDef<'a>)>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WindowName<'a> {
     Name(&'a str),
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowDef<'a> {
     pub base_window_name: Option<&'a str>,
@@ -410,6 +436,7 @@ pub struct WindowDef<'a> {
     pub order_by: Option<OrderByClause<'a>>,
     pub frame_spec: Option<FrameSpec<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameSpec<'a> {
     pub frame_type: FrameType,
@@ -417,12 +444,14 @@ pub struct FrameSpec<'a> {
     pub frame_end: Option<FrameBound<'a>>,
     pub exclude: Option<FrameExclude>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FrameType {
     Rows,
     Range,
     Groups,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FrameBound<'a> {
     UnboundedPreceding,
@@ -431,6 +460,7 @@ pub enum FrameBound<'a> {
     Following(Box<Expr<'a>>),
     UnboundedFollowing,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FrameExclude {
     NoOthers,
@@ -438,11 +468,13 @@ pub enum FrameExclude {
     Group,
     Ties,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WithClause<'a> {
     pub recursive: bool,
     pub cte_tables: Vec<CommonTableExpression<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommonTableExpression<'a> {
     pub table_name: &'a str,
@@ -450,31 +482,37 @@ pub struct CommonTableExpression<'a> {
     pub select_stmt: Box<SelectStmt<'a>>,
     pub materialized: Option<bool>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrderByClause<'a> {
     pub terms: Vec<OrderingTerm<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrderingTerm<'a> {
     pub expr: Box<Expr<'a>>,
     pub asc_desc: Option<AscDesc>,
     pub nulls: Option<NullsOrder>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AscDesc {
     Asc,
     Desc,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NullsOrder {
     First,
     Last,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LimitClause<'a> {
     pub limit: Box<Expr<'a>>,
     pub offset: Option<Box<Expr<'a>>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundOperator {
     Union,
@@ -482,6 +520,7 @@ pub enum CompoundOperator {
     Intersect,
     Except,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnDef<'a> {
     pub name: &'a str,

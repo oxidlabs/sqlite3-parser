@@ -2438,7 +2438,7 @@ impl<'a> Parser<'a> {
 
     fn parse_create_table(&mut self) -> Result<Stmt<'static>, String> {
         debug!("parse_create_table: entry, current_token: {:?}", self.current_token);
-        // Handle IF NOT EXISTS
+        // Handle optional IF NOT EXISTS
         let mut if_not_exists = false;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
             if id.eq_ignore_ascii_case("IF") {
@@ -2448,9 +2448,10 @@ impl<'a> Parser<'a> {
                         self.advance();
                         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
                             if id.eq_ignore_ascii_case("EXISTS") {
-                                if_not_exists = true;
                                 self.advance();
+                                if_not_exists = true;
                             } else {
+                                return Err(format!("Expected EXISTS after IF NOT, found {:?}", self.current_token));
                                 return Err(format!(
                                     "Expected EXISTS after IF NOT, found {:?}",
                                     self.current_token
@@ -2496,14 +2497,14 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 let table_name = id_static;
-                // current_token is now the action (ADD/RENAME/DROP)
-                return self.parse_alter_table_action(None, table_name);
+                // After table, expect ( or AS for CREATE TABLE
+                return self.parse_create_table_body(None, table_name, if_not_exists);
             }
         }
 
-        debug!("parse_alter_table: error, expected table name after ALTER TABLE, found {:?}", self.current_token);
+        debug!("parse_create_table: error, expected table name after CREATE TABLE, found {:?}", self.current_token);
         Err(format!(
-            "Expected table name after ALTER TABLE, found {:?}",
+            "Expected table name after CREATE TABLE, found {:?}",
             self.current_token
         ))
     }
