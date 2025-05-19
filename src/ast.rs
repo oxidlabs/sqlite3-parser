@@ -293,7 +293,7 @@ pub enum AlterTable<'a> {
         column_name: &'a str,
         new_name: &'a str,
     },
-    Add(&'a str),
+    Add(ColumnDef<'a>),
     Drop(&'a str),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -488,6 +488,7 @@ pub struct ColumnDef<'a> {
     pub type_name: Option<&'a str>,
     pub constraints: Vec<ColumnConstraint<'a>>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColumnConstraint<'a> {
     PrimaryKey {

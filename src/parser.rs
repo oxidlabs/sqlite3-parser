@@ -163,7 +163,6 @@ impl<'a> Parser<'a> {
                 ));
             }
         }
-        // println!("[DEBUG] After FROM, current_token: {:?}", self.current_token);
         // Parse full FROM clause, including JOINs and aliases
         let from_clause = Some(self.parse_from_clause()?);
         debug!("parse_select: after parse_from_clause, current_token: {:?}", self.current_token);
@@ -171,69 +170,83 @@ impl<'a> Parser<'a> {
         let mut where_clause = None;
         if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
             if keyword.eq_ignore_ascii_case("WHERE") {
+                debug!("parse_select: found WHERE");
                 self.advance();
                 where_clause = Some(Box::new(self.parse_expr()?));
+                debug!("parse_select: after WHERE, current_token: {:?}", self.current_token);
             }
         }
-        // Parse optional GROUP BY and HAVING
+        // Parse optional GROUP BY, HAVING, ORDER BY, LIMIT
         let mut group_by_clause = None;
         let mut having_clause = None;
-        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
-            if keyword.eq_ignore_ascii_case("GROUP") {
-                self.advance();
-                if let TokenType::Valid(Token::IDENTIFIER(by_kw)) = &self.current_token {
-                    if by_kw.eq_ignore_ascii_case("BY") {
-                        self.advance();
-                        group_by_clause = Some(self.parse_group_by_clause()?);
+        let mut order_by_clause = None;
+        let mut limit_clause = None;
+        loop {
+            debug!("parse_select: current_token after WHERE: {:?}", self.current_token);
+            match &self.current_token {
+                TokenType::Valid(Token::GROUP_BY) => {
+                    debug!("parse_select: found GROUP BY");
+                    self.advance();
+                    group_by_clause = Some(self.parse_group_by_clause()?);
+                    debug!("parse_select: after GROUP BY, current_token: {:?}", self.current_token);
+                }
+                TokenType::Valid(Token::IDENTIFIER(keyword)) if keyword.eq_ignore_ascii_case("GROUP") => {
+                    debug!("parse_select: found GROUP");
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(by_kw)) = &self.current_token {
+                        if by_kw.eq_ignore_ascii_case("BY") {
+                            debug!("parse_select: found GROUP BY");
+                            self.advance();
+                            group_by_clause = Some(self.parse_group_by_clause()?);
+                            debug!("parse_select: after GROUP BY, current_token: {:?}", self.current_token);
+                        } else {
+                            return Err(format!(
+                                "Expected BY after GROUP, found {:?}",
+                                self.current_token
+                            ));
+                        }
                     } else {
                         return Err(format!(
                             "Expected BY after GROUP, found {:?}",
                             self.current_token
                         ));
                     }
-                } else {
-                    return Err(format!(
-                        "Expected BY after GROUP, found {:?}",
-                        self.current_token
-                    ));
                 }
-            }
-        }
-        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
-            if keyword.eq_ignore_ascii_case("HAVING") {
-                self.advance();
-                having_clause = Some(Box::new(self.parse_expr()?));
-            }
-        }
-        // Parse optional ORDER BY and LIMIT
-        let mut order_by_clause = None;
-        let mut limit_clause = None;
-        if let TokenType::Valid(Token::ORDER_BY) = &self.current_token {
-            debug!("parse_select: found ORDER BY");
-            self.advance();
-            order_by_clause = Some(crate::ast::OrderByClause {
-                terms: self.parse_order_by_clause()?,
-            });
-        } else if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
-            if keyword.eq_ignore_ascii_case("ORDER") {
-                debug!("parse_select: found ORDER");
-                self.advance();
-                if let TokenType::Valid(Token::IDENTIFIER(by_kw)) = &self.current_token {
-                    if by_kw.eq_ignore_ascii_case("BY") {
-                        debug!("parse_select: found ORDER BY");
-                        self.advance();
-                        order_by_clause = Some(crate::ast::OrderByClause {
-                            terms: self.parse_order_by_clause()?,
-                        });
+                TokenType::Valid(Token::IDENTIFIER(keyword)) if keyword.eq_ignore_ascii_case("HAVING") => {
+                    debug!("parse_select: found HAVING");
+                    self.advance();
+                    having_clause = Some(Box::new(self.parse_expr()?));
+                    debug!("parse_select: after HAVING, current_token: {:?}", self.current_token);
+                }
+                TokenType::Valid(Token::ORDER_BY) => {
+                    debug!("parse_select: found ORDER BY");
+                    self.advance();
+                    order_by_clause = Some(crate::ast::OrderByClause {
+                        terms: self.parse_order_by_clause()?,
+                    });
+                    debug!("parse_select: after ORDER BY, current_token: {:?}", self.current_token);
+                }
+                TokenType::Valid(Token::IDENTIFIER(keyword)) if keyword.eq_ignore_ascii_case("ORDER") => {
+                    debug!("parse_select: found ORDER");
+                    self.advance();
+                    if let TokenType::Valid(Token::IDENTIFIER(by_kw)) = &self.current_token {
+                        if by_kw.eq_ignore_ascii_case("BY") {
+                            debug!("parse_select: found ORDER BY");
+                            self.advance();
+                            order_by_clause = Some(crate::ast::OrderByClause {
+                                terms: self.parse_order_by_clause()?,
+                            });
+                            debug!("parse_select: after ORDER BY, current_token: {:?}", self.current_token);
+                        }
                     }
                 }
-            }
-        }
-        if let TokenType::Valid(Token::IDENTIFIER(keyword)) = &self.current_token {
-            if keyword.eq_ignore_ascii_case("LIMIT") {
-                debug!("parse_select: found LIMIT");
-                self.advance();
-                limit_clause = Some(self.parse_limit_clause()?);
+                TokenType::Valid(Token::IDENTIFIER(keyword)) if keyword.eq_ignore_ascii_case("LIMIT") => {
+                    debug!("parse_select: found LIMIT");
+                    self.advance();
+                    limit_clause = Some(self.parse_limit_clause()?);
+                    debug!("parse_select: after LIMIT, current_token: {:?}", self.current_token);
+                }
+                _ => break,
             }
         }
         // Only allow end-of-input, semicolon, right paren, or next clause keyword after
@@ -241,7 +254,6 @@ impl<'a> Parser<'a> {
             TokenType::EndOfInput => {}
             TokenType::Valid(Token::SEMICOLON) => {}
             TokenType::Valid(Token::RIGHT_PAREN) => {} // Allow closing paren for subqueries
-            TokenType::Valid(Token::ORDER_BY) => {}
             TokenType::Valid(Token::IDENTIFIER(keyword))
                 if keyword.eq_ignore_ascii_case("LIMIT") => {}
             TokenType::Valid(Token::IDENTIFIER(keyword))
@@ -267,7 +279,6 @@ impl<'a> Parser<'a> {
                 ));
             }
         }
-        // println!("[DEBUG] Final token before SelectCore: {:?}", self.current_token);
         let select_core = SelectCore {
             distinct: false,
             result_columns,
@@ -2272,40 +2283,27 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let mut current_token = None;
-
         // Parse table name (and possibly schema name)
-        let mut schema_name = None;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
-            // let name = id.to_string();
-            current_token = match self.lexer.next() {
-                Some(Ok(token)) => Some(TokenType::Valid(token)),
-                Some(Err(_)) => Some(TokenType::Error),
-                None => Some(TokenType::EndOfInput),
-            };
-            self.span = self.lexer.span();
-
-            // Check for schema_name.table_name format
+            let id_static = id.into_static();
+            self.advance();
             if let TokenType::Valid(Token::DOT) = &self.current_token {
-                schema_name = Some(id.into_static());
                 self.advance();
-                if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
-                    current_token = match self.lexer.next() {
-                        Some(Ok(token)) => Some(TokenType::Valid(token)),
-                        Some(Err(_)) => Some(TokenType::Error),
-                        None => Some(TokenType::EndOfInput),
-                    };
-                    self.span = self.lexer.span();
-                    return self.parse_alter_table_action(schema_name, id.into_static());
+                if let TokenType::Valid(Token::IDENTIFIER(id2)) = &self.current_token {
+                    let table_name = id2.into_static();
+                    self.advance(); // Now at the action token (ADD/RENAME/DROP)
+                    return self.parse_alter_table_action(Some(id_static), table_name);
                 } else {
                     return Err(format!(
                         "Expected table name after schema name, found {:?}",
                         self.current_token
                     ));
                 }
+            } else {
+                let table_name = id_static;
+                // Do NOT advance here, current_token is already the action (ADD/RENAME/DROP)
+                return self.parse_alter_table_action(None, table_name);
             }
-
-            return self.parse_alter_table_action(None, id.into_static());
         }
 
         debug!("parse_alter_table: error, expected table name after ALTER TABLE, found {:?}", self.current_token);
@@ -2379,73 +2377,12 @@ impl<'a> Parser<'a> {
 
                 // Now parse the column definition
                 if let TokenType::Valid(Token::IDENTIFIER(column_name)) = &self.current_token {
-                    let mut column_def = String::new();
-                    column_def.push_str(column_name);
-                    self.advance();
-
-                    // Get column type if present
-                    if let TokenType::Valid(Token::IDENTIFIER(column_type)) = &self.current_token {
-                        column_def.push_str(" ");
-                        column_def.push_str(column_type);
-                        self.advance();
-
-                        // Parse any constraints that follow
-                        while let TokenType::Valid(token) = &self.current_token {
-                            match token {
-                                Token::IDENTIFIER(constraint) => {
-                                    column_def.push_str(" ");
-                                    column_def.push_str(constraint);
-                                    self.advance();
-                                }
-                                Token::LEFT_PAREN => {
-                                    column_def.push_str("(");
-                                    self.advance();
-                                    // Capture everything until the right parenthesis
-                                    let mut paren_depth = 1;
-                                    while paren_depth > 0 {
-                                        match &self.current_token {
-                                            TokenType::Valid(Token::RIGHT_PAREN) => {
-                                                paren_depth -= 1;
-                                                if paren_depth == 0 {
-                                                    column_def.push_str(")");
-                                                } else {
-                                                    column_def.push_str(")");
-                                                }
-                                                self.advance();
-                                            }
-                                            TokenType::Valid(Token::LEFT_PAREN) => {
-                                                paren_depth += 1;
-                                                column_def.push_str("(");
-                                                self.advance();
-                                            }
-                                            TokenType::Valid(Token::COMMA) => {
-                                                column_def.push_str(",");
-                                                self.advance();
-                                            }
-                                            TokenType::Valid(Token::NUMBER(num)) => {
-                                                column_def.push_str(num);
-                                                self.advance();
-                                            }
-                                            TokenType::Valid(Token::IDENTIFIER(id)) => {
-                                                column_def.push_str(id);
-                                                self.advance();
-                                            }
-                                            _ => {
-                                                // End of parenthesized content
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => break,
-                            }
-                        }
-                    }
-
+                    // Now parse the column definition using the full parser logic
+                    let column_def = self.parse_column_def()?;
                     return Ok(Stmt::AlterTable(AlterTableStmt {
                         schema_name,
                         table_name,
-                        stmt: AlterTable::Add(convert_str(column_def)),
+                        stmt: AlterTable::Add(column_def),
                     }));
                 }
             } else if action.eq_ignore_ascii_case("DROP") {
@@ -2541,17 +2478,16 @@ impl<'a> Parser<'a> {
         }
 
         // Parse table name (and possibly schema name)
-        let mut schema_name = None;
         if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
-            let name = id.to_string();
+            let id_static = id.into_static();
             self.advance();
             if let TokenType::Valid(Token::DOT) = &self.current_token {
                 self.advance();
-                schema_name = Some(convert_str(name));
-                if let TokenType::Valid(Token::IDENTIFIER(id)) = &self.current_token {
-                    let table_name = convert_str(id.to_string());
+                if let TokenType::Valid(Token::IDENTIFIER(id2)) = &self.current_token {
+                    let table_name = id2.into_static();
                     self.advance();
-                    return self.parse_create_table_body(schema_name, table_name, if_not_exists);
+                    // current_token is now the action (ADD/RENAME/DROP)
+                    return self.parse_alter_table_action(Some(id_static), table_name);
                 } else {
                     return Err(format!(
                         "Expected table name after schema name, found {:?}",
@@ -2559,14 +2495,15 @@ impl<'a> Parser<'a> {
                     ));
                 }
             } else {
-                let table_name = convert_str(name);
-                return self.parse_create_table_body(schema_name, table_name, if_not_exists);
+                let table_name = id_static;
+                // current_token is now the action (ADD/RENAME/DROP)
+                return self.parse_alter_table_action(None, table_name);
             }
         }
 
-        debug!("parse_create_table: error, expected table name, found {:?}", self.current_token);
+        debug!("parse_alter_table: error, expected table name after ALTER TABLE, found {:?}", self.current_token);
         Err(format!(
-            "Expected table name, found {:?}",
+            "Expected table name after ALTER TABLE, found {:?}",
             self.current_token
         ))
     }

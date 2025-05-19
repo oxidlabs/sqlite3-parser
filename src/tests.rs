@@ -38,162 +38,387 @@ fn test_select_all() {
 
 #[test]
 fn test_select_columns() {
+    use crate::ast::{Expr, ResultColumn, SelectCore, SelectStmt, Stmt, TableOrSubquery};
+
     let query = "SELECT id, name, email FROM users";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::Select(select_stmt) => {
-            assert_eq!(select_stmt.select_core.result_columns.len(), 3);
-            assert!(select_stmt.select_core.from_clause.is_some());
-        }
-        _ => panic!("Expected Select statement"),
-    }
 
-    // Test with WHERE clause as a separate test
+    let expected = Stmt::Select(Box::new(SelectStmt {
+        with_clause: None,
+        compound_operator: None,
+        select_core: SelectCore {
+            distinct: false,
+            result_columns: vec![
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: "id",
+                    }),
+                    alias: None,
+                },
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: "name",
+                    }),
+                    alias: None,
+                },
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: "email",
+                    }),
+                    alias: None,
+                },
+            ],
+            from_clause: Some(FromClause {
+                tables: vec![TableOrSubquery::Table {
+                    schema_name: None,
+                    table_name: "users",
+                    alias: None,
+                    indexed_by: None,
+                    not_indexed: false,
+                }],
+                join_clauses: vec![],
+            }),
+            where_clause: None,
+            group_by_clause: None,
+            having_clause: None,
+            window_clause: None,
+        },
+        order_by_clause: None,
+        limit_clause: None,
+    }));
+
+    assert_eq!(statements[0], expected);
+
+    // Test with WHERE clause
     let query_with_where = "SELECT id, name, email FROM users WHERE id > 100";
     let result_with_where = parse(query_with_where);
     assert!(result_with_where.is_ok());
     let statements_with_where = result_with_where.unwrap();
-    match &statements_with_where[0] {
-        Stmt::Select(select_stmt) => {
-            assert!(select_stmt.select_core.where_clause.is_some());
-        }
-        _ => panic!("Expected Select statement with WHERE clause"),
-    }
+
+    let expected_with_where = Stmt::Select(Box::new(SelectStmt {
+        with_clause: None,
+        compound_operator: None,
+        select_core: SelectCore {
+            distinct: false,
+            result_columns: vec![
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: "id",
+                    }),
+                    alias: None,
+                },
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: "name",
+                    }),
+                    alias: None,
+                },
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: None,
+                        column_name: "email",
+                    }),
+                    alias: None,
+                },
+            ],
+            from_clause: Some(FromClause {
+                tables: vec![TableOrSubquery::Table {
+                    schema_name: None,
+                    table_name: "users",
+                    alias: None,
+                    indexed_by: None,
+                    not_indexed: false,
+                }],
+                join_clauses: vec![],
+            }),
+            where_clause: Some(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Column {
+                    schema_name: None,
+                    table_name: None,
+                    column_name: "id",
+                }),
+                op: crate::ast::BinaryOperator::GreaterThan,
+                right: Box::new(Expr::Literal(crate::ast::Literal::Numeric("100"))),
+            })),
+            group_by_clause: None,
+            having_clause: None,
+            window_clause: None,
+        },
+        order_by_clause: None,
+        limit_clause: None,
+    }));
+
+    assert_eq!(statements_with_where[0], expected_with_where);
 }
 
 #[test]
 fn test_select_with_join() {
+    use crate::ast::*;
     let query = "SELECT u.id, u.name, p.title FROM users u JOIN posts p ON u.id = p.user_id";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::Select(select_stmt) => {
-            if let Some(from_clause) = &select_stmt.select_core.from_clause {
-                assert_eq!(from_clause.join_clauses.len(), 1);
-                match &from_clause.join_clauses[0].join_type {
-                    JoinType::Inner => {}
-                    _ => panic!("Expected INNER JOIN"),
-                }
-            } else {
-                panic!("Expected FROM clause with JOIN");
-            }
-        }
-        _ => panic!("Expected Select statement"),
-    }
+
+    let expected = Stmt::Select(Box::new(SelectStmt {
+        with_clause: None,
+        compound_operator: None,
+        select_core: SelectCore {
+            distinct: false,
+            result_columns: vec![
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: Some("u"),
+                        column_name: "id",
+                    }),
+                    alias: None,
+                },
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: Some("u"),
+                        column_name: "name",
+                    }),
+                    alias: None,
+                },
+                ResultColumn::Expr {
+                    expr: Box::new(Expr::Column {
+                        schema_name: None,
+                        table_name: Some("p"),
+                        column_name: "title",
+                    }),
+                    alias: None,
+                },
+            ],
+            from_clause: Some(FromClause {
+                tables: vec![TableOrSubquery::Table {
+                    schema_name: None,
+                    table_name: "users",
+                    alias: Some("u"),
+                    indexed_by: None,
+                    not_indexed: false,
+                }],
+                join_clauses: vec![JoinClause {
+                    join_type: JoinType::Inner,
+                    table_or_subquery: TableOrSubquery::Table {
+                        schema_name: None,
+                        table_name: "posts",
+                        alias: Some("p"),
+                        indexed_by: None,
+                        not_indexed: false,
+                    },
+                    constraint: JoinConstraint::On(
+                        Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::Column {
+                                schema_name: None,
+                                table_name: Some("u"),
+                                column_name: "id",
+                            }),
+                            op: BinaryOperator::Equals,
+                            right: Box::new(Expr::Column {
+                                schema_name: None,
+                                table_name: Some("p"),
+                                column_name: "user_id",
+                            }),
+                        })
+                    ),
+                }],
+            }),
+            where_clause: None,
+            group_by_clause: None,
+            having_clause: None,
+            window_clause: None,
+        },
+        order_by_clause: None,
+        limit_clause: None,
+    }));
+
+    assert_eq!(statements[0], expected);
 }
+
 
 #[test]
 fn test_create_table() {
+    use crate::ast::*;
     let query =
         "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE)";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::CreateTable {
-            table_name, body, ..
-        } => {
-            assert_eq!(*table_name, "users");
-            match &**body {
-                CreateTableBody::ColumnsAndConstraints { columns, .. } => {
-                    assert_eq!(columns.len(), 3);
-                    assert_eq!(columns[0].name, "id");
-                    assert_eq!(columns[1].name, "name");
-                    assert_eq!(columns[2].name, "email");
-                }
-                _ => panic!("Expected ColumnsAndConstraints"),
-            }
-        }
-        _ => panic!("Expected CreateTable statement"),
-    }
+
+    let expected = Stmt::CreateTable {
+        temp_temporary: None,
+        if_not_exists: false,
+        schema_name: None,
+        table_name: "users",
+        body: Box::new(CreateTableBody::ColumnsAndConstraints {
+            columns: vec![
+                ColumnDef {
+                    name: "id",
+                    type_name: Some("INTEGER"),
+                    constraints: vec![ColumnConstraint::PrimaryKey {
+                        order: None,
+                        conflict_clause: None,
+                        autoincrement: false,
+                    }],
+                },
+                ColumnDef {
+                    name: "name",
+                    type_name: Some("TEXT"),
+                    constraints: vec![ColumnConstraint::NotNull(None)],
+                },
+                ColumnDef {
+                    name: "email",
+                    type_name: Some("TEXT"),
+                    constraints: vec![ColumnConstraint::Unique(None)],
+                },
+            ],
+            constraints: vec![],
+        }),
+    };
+
+    assert_eq!(statements[0], expected);
 }
+
 
 #[test]
 fn test_insert() {
+    use crate::ast::*;
     let query = "INSERT INTO users (name, email) VALUES ('John', 'john@example.com')";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::Insert {
-            table_name,
-            data_source,
-            ..
-        } => {
-            assert_eq!(*table_name, "users");
-            match data_source {
-                InsertDataSource::Values(values) => {
-                    assert_eq!(values.len(), 1); // One row
-                    assert_eq!(values[0].len(), 2); // Two columns
-                }
-                _ => panic!("Expected VALUES"),
-            }
-        }
-        _ => panic!("Expected Insert statement"),
-    }
+
+    let expected = Stmt::Insert {
+        with_clause: None,
+        or_conflict: None,
+        schema_name: None,
+        table_name: "users",
+        alias: None,
+        column_names: Some(vec!["name", "email"]),
+        data_source: InsertDataSource::Values(vec![vec![
+            Expr::Literal(Literal::String("John")),
+            Expr::Literal(Literal::String("john@example.com")),
+        ]]),
+        returning_clause: None,
+    };
+
+    assert_eq!(statements[0], expected);
 }
 
 #[test]
 fn test_update() {
+    use crate::ast::*;
     let query = "UPDATE users SET name = 'Jane', email = 'jane@example.com' WHERE id = 1";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::Update {
-            qualified_table_name,
-            set_clauses,
-            where_clause,
-            ..
-        } => {
-            assert_eq!(qualified_table_name.table_name, "users");
-            assert_eq!(set_clauses.len(), 2);
-            assert!(where_clause.is_some());
-        }
-        _ => panic!("Expected Update statement"),
-    }
+
+    let expected = Stmt::Update {
+        with_clause: None,
+        or_conflict: None,
+        qualified_table_name: QualifiedTableName {
+            schema_name: None,
+            table_name: "users",
+            alias: None,
+            indexed_by: None,
+            not_indexed: false,
+        },
+        set_clauses: vec![
+            SetClause {
+                column_name: "name",
+                expr: Box::new(Expr::Literal(Literal::String("Jane"))),
+            },
+            SetClause {
+                column_name: "email",
+                expr: Box::new(Expr::Literal(Literal::String("jane@example.com"))),
+            },
+        ],
+        from_clause: None,
+        where_clause: Some(Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::Column {
+                schema_name: None,
+                table_name: None,
+                column_name: "id",
+            }),
+            op: BinaryOperator::Equals,
+            right: Box::new(Expr::Literal(Literal::Numeric("1"))),
+        })),
+        returning_clause: None,
+        order_by_clause: None,
+        limit_clause: None,
+    };
+
+    assert_eq!(statements[0], expected);
 }
+
 
 #[test]
 fn test_delete() {
+    use crate::ast::*;
     let query = "DELETE FROM users WHERE id = 1";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::Delete {
-            qualified_table_name,
-            where_clause,
-            ..
-        } => {
-            assert_eq!(qualified_table_name.table_name, "users");
-            assert!(where_clause.is_some());
-        }
-        _ => panic!("Expected Delete statement"),
-    }
+
+    let expected = Stmt::Delete {
+        with_clause: None,
+        qualified_table_name: QualifiedTableName {
+            schema_name: None,
+            table_name: "users",
+            alias: None,
+            indexed_by: None,
+            not_indexed: false,
+        },
+        where_clause: Some(Box::new(Expr::BinaryOp {
+            left: Box::new(Expr::Column {
+                schema_name: None,
+                table_name: None,
+                column_name: "id",
+            }),
+            op: BinaryOperator::Equals,
+            right: Box::new(Expr::Literal(Literal::Numeric("1"))),
+        })),
+        order_by_clause: None,
+        limit_clause: None,
+        returning_clause: None,
+    };
+
+    assert_eq!(statements[0], expected);
 }
 
 #[test]
 fn test_alter_table() {
+    use crate::ast::*;
     let query = "ALTER TABLE users ADD COLUMN phone TEXT";
     let result = parse(query);
     assert!(result.is_ok());
     let statements = result.unwrap();
-    match &statements[0] {
-        Stmt::AlterTable(alter_table) => {
-            assert_eq!(alter_table.table_name, "users");
-            match alter_table.stmt {
-                AlterTable::Add(column_def) => {
-                    assert_eq!(column_def, "phone TEXT");
-                }
-                _ => panic!("Expected ADD operation"),
-            }
-        }
-        _ => panic!("Expected AlterTable statement"),
-    }
+
+    let expected = Stmt::AlterTable(AlterTableStmt {
+        schema_name: None,
+        table_name: "users",
+        stmt: AlterTable::Add(ColumnDef {
+            name: "phone",
+            type_name: Some("TEXT"),
+            constraints: vec![],
+        }),
+    });
+
+    assert_eq!(statements[0], expected);
 }
 
 #[test]
@@ -296,7 +521,6 @@ fn test_union() {
         println!("UNION query parsing not implemented yet");
     }
 }
-
 
 #[test]
 fn test_malformed_select_keywords_as_columns() {
