@@ -11,6 +11,8 @@ tracing-subscriber = "0.3.19"
 [dev-dependencies]
 criterion = "0.5.1"
 sqlparser = "0.38.0"
+sqlite3-parser = "0.14.0"
+fallible-iterator = "0.3"
 
 [[bench]]
 name = "parser_benchmark"

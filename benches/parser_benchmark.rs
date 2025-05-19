@@ -2,6 +2,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use sqlite3_parser_logos::parser::parse_statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser as SQLParser;
+use sqlite3_parser::lexer::sql::Parser as SQLiteParser;
+use fallible_iterator::FallibleIterator;
 
 fn bench_parsers(c: &mut Criterion) {
     let mut group = c.benchmark_group("SQLite Parsers");
@@ -52,7 +54,7 @@ fn bench_parsers(c: &mut Criterion) {
         let query_name = format!("query_{}", i + 1);
         group.throughput(Throughput::Bytes(query.len() as u64));
         group.bench_with_input(
-            BenchmarkId::new("logos_parser", &query_name),
+            BenchmarkId::new("sqlite3_parser_logos", &query_name),
             query,
             |b, q| {
                 b.iter(|| {
@@ -65,10 +67,22 @@ fn bench_parsers(c: &mut Criterion) {
                 let _ = black_box(SQLParser::parse_sql(&dialect, black_box(q)));
             })
         });
+        group.bench_with_input(BenchmarkId::new("sqlite3_parser", &query_name), query, |b, q| {
+            b.iter(|| {
+                let mut parser = SQLiteParser::new(black_box(q).as_bytes());
+                loop {
+                    match parser.next() {
+                        Ok(None) => break,
+                        Err(_) => break,
+                        Ok(Some(_cmd)) => {},
+                    }
+                }
+            })
+        });
     }
     let all_queries = test_queries.join("\n");
     group.throughput(Throughput::Bytes(all_queries.len() as u64));
-    group.bench_function("logos_parser/batch_all_queries", |b| {
+    group.bench_function("sqlite3_parser_logos/batch_all_queries", |b| {
         b.iter(|| {
             for query in test_queries.iter() {
                 let _ = black_box(parse_statement(black_box(*query)));
@@ -78,7 +92,21 @@ fn bench_parsers(c: &mut Criterion) {
     group.bench_function("sqlparser/batch_all_queries", |b| {
         b.iter(|| {
             for query in test_queries.iter() {
-                let _ = black_box(SQLParser::parse_sql(&dialect, black_box(query)));
+                let _ = black_box(SQLParser::parse_sql(&dialect, black_box(*query)));
+            }
+        })
+    });
+    group.bench_function("sqlite3_parser/batch_all_queries", |b| {
+        b.iter(|| {
+            for query in test_queries.iter() {
+                let mut parser = SQLiteParser::new(black_box(query).as_bytes());
+                loop {
+                    match parser.next() {
+                        Ok(None) => break,
+                        Err(_) => break,
+                        Ok(Some(_cmd)) => {},
+                    }
+                }
             }
         })
     });

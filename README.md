@@ -18,6 +18,7 @@ This project implements a parser for SQLite3 SQL statements, focusing on high pe
 - Does not support UNION
 - Does not support INTERSECT
 - Does not support EXCEPT
+- Does not support CASE/WHEN, IF
 
 ## Usage
 
